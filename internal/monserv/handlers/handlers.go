@@ -14,15 +14,24 @@ type Number interface {
 }
 
 func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
-
 	return func(rw http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			rw.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
 		t := req.PathValue(defcfg.URLTypePath)
 		n := req.PathValue(defcfg.URLNamePath)
 		v := req.PathValue(defcfg.URLValuePath)
+
+		if n == "" {
+			http.Error(rw, "name must contain a value", http.StatusNotFound)
+		}
+
 		if t == defcfg.UpdateTypeGauge {
 			gv, err := strconv.ParseFloat(v, 64)
 			if err != nil {
-				http.Error(rw, "internal error", http.StatusInternalServerError)
+				http.Error(rw, "invalid value", http.StatusBadRequest)
 			}
 			s.Add(storage.MetricRec{ValueType: t, Name: n, GaugeVal: gv})
 			rw.WriteHeader(http.StatusOK)
@@ -30,7 +39,7 @@ func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
 		} else if t == defcfg.UpdateTypeCounter {
 			cv, err := strconv.ParseInt(v, 10, 64)
 			if err != nil {
-				http.Error(rw, "internal error", http.StatusInternalServerError)
+				http.Error(rw, "invalid value", http.StatusBadRequest)
 			}
 			s.Add(storage.MetricRec{ValueType: t, Name: n, CounterVal: cv})
 			rw.WriteHeader(http.StatusOK)
