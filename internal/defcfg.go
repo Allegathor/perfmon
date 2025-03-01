@@ -1,8 +1,8 @@
 package defcfg
 
-const URL_TYPE_PATH = "type"
-const URL_NAME_PATH = "name"
-const URL_VALUE_PATH = "value"
+const URLTypePath = "type"
+const URLNamePath = "name"
+const URLValuePath = "value"
 
-const UPDATE_TYPE_GAUGE = "gauge"
-const UPDATE_TYPE_COUNTER = "counter"
+const UpdateTypeGauge = "gauge"
+const UpdateTypeCounter = "counter"

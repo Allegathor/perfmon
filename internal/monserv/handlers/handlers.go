@@ -16,10 +16,10 @@ type Number interface {
 func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
 
 	return func(rw http.ResponseWriter, req *http.Request) {
-		t := req.PathValue(defcfg.URL_TYPE_PATH)
-		n := req.PathValue(defcfg.URL_NAME_PATH)
-		v := req.PathValue(defcfg.URL_VALUE_PATH)
-		if t == defcfg.UPDATE_TYPE_GAUGE {
+		t := req.PathValue(defcfg.URLTypePath)
+		n := req.PathValue(defcfg.URLNamePath)
+		v := req.PathValue(defcfg.URLValuePath)
+		if t == defcfg.UpdateTypeGauge {
 			gv, err := strconv.ParseFloat(v, 64)
 			if err != nil {
 				http.Error(rw, "internal error", http.StatusInternalServerError)
@@ -27,7 +27,7 @@ func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
 			s.Add(storage.MetricRec{ValueType: t, Name: n, GaugeVal: gv})
 			rw.WriteHeader(http.StatusOK)
 
-		} else if t == defcfg.UPDATE_TYPE_COUNTER {
+		} else if t == defcfg.UpdateTypeCounter {
 			cv, err := strconv.ParseInt(v, 10, 64)
 			if err != nil {
 				http.Error(rw, "internal error", http.StatusInternalServerError)
