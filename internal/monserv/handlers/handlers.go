@@ -9,10 +9,6 @@ import (
 	"github.com/Allegathor/perfmon/internal/storage"
 )
 
-type Number interface {
-	int64 | float64
-}
-
 func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodPost {

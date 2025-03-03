@@ -1,9 +1,5 @@
 package storage
 
-type MetricValue interface {
-	int64 | float64
-}
-
 type Storage interface {
 	Add(rec MetricRec)
 	GetHistory() []MetricRec
