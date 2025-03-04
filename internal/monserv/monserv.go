@@ -11,14 +11,12 @@ import (
 type MonServ struct {
 	r    chi.Router
 	addr string
-	mux  *http.ServeMux
 }
 
 func NewInstance(addr string) *MonServ {
 	mon := &MonServ{
 		r:    chi.NewRouter(),
 		addr: addr,
-		mux:  http.NewServeMux(),
 	}
 
 	return mon
