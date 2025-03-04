@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"math/rand"
 	"runtime"
 	"time"
 )
@@ -82,7 +81,7 @@ func (c *Collector) GaugeStats() {
 }
 
 func (c *Collector) UpdateCounters() {
-	c.SetCounter("RandomValue", rand.Int63n(21))
+	c.SetCounter("RandomValue", 1)
 	c.SetCounter("PollCount", 1)
 }
 
