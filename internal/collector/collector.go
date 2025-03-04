@@ -31,10 +31,10 @@ func (c *Collector) SetGauge(k string, g float64) {
 }
 
 func (c *Collector) SetCounter(k string, counter int64) {
-	// if _, ok := c.mtcs.Counter[k]; ok {
-	// 	c.mtcs.Counter[k] += counter
-	// 	return
-	// }
+	if _, ok := c.mtcs.Counter[k]; ok {
+		c.mtcs.Counter[k] += counter
+		return
+	}
 
 	c.mtcs.Counter[k] = counter
 }
