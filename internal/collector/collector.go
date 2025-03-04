@@ -12,10 +12,10 @@ type Mtcs struct {
 
 type Collector struct {
 	mtcs         Mtcs
-	pollInterval uint8
+	pollInterval uint
 }
 
-func New(pollInterval uint8) *Collector {
+func New(pollInterval uint) *Collector {
 	m := Mtcs{
 		Gauge:   make(map[string]float64),
 		Counter: make(map[string]int64),

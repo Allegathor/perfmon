@@ -1,7 +1,6 @@
 package monserv
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/Allegathor/perfmon/internal/monserv/handlers"
@@ -11,14 +10,14 @@ import (
 
 type MonServ struct {
 	r    chi.Router
-	port int
+	addr string
 	mux  *http.ServeMux
 }
 
-func NewInstance(port int) *MonServ {
+func NewInstance(addr string) *MonServ {
 	mon := &MonServ{
 		r:    chi.NewRouter(),
-		port: port,
+		addr: addr,
 		mux:  http.NewServeMux(),
 	}
 
@@ -26,7 +25,6 @@ func NewInstance(port int) *MonServ {
 }
 
 func (mon *MonServ) Run() error {
-	addr := fmt.Sprintf(":%d", mon.port)
 	ms := storage.NewMetrics()
 	mon.r.Get("/", handlers.CreateRootHandler(ms))
 	mon.r.Route("/update", func(r chi.Router) {
@@ -40,5 +38,5 @@ func (mon *MonServ) Run() error {
 		})
 	})
 
-	return http.ListenAndServe(addr, mon.r)
+	return http.ListenAndServe(mon.addr, mon.r)
 }

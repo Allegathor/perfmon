@@ -11,17 +11,15 @@ import (
 )
 
 type MonClient struct {
-	baseURL      string
-	port         int
+	addr         string
 	updatePath   string
-	pollInterval uint8
+	pollInterval uint
 	*http.Client
 }
 
-func NewInstance(base string, p int, interval uint8) *MonClient {
+func NewInstance(addr string, interval uint) *MonClient {
 	m := &MonClient{
-		baseURL:      fmt.Sprintf("%s:%d", base, p),
-		port:         p,
+		addr:         addr,
 		updatePath:   "update",
 		pollInterval: interval,
 		Client:       &http.Client{},
@@ -32,7 +30,7 @@ func NewInstance(base string, p int, interval uint8) *MonClient {
 
 func (m *MonClient) PostGauge(name string, v float64) {
 	path := name + "/" + strings.TrimRight(strconv.FormatFloat(v, 'f', -1, 64), "0.")
-	u := fmt.Sprintf("%s/%s/%s/%s", m.baseURL, m.updatePath, defcfg.TypeGauge, path)
+	u := fmt.Sprintf("%s/%s/%s/%s", m.addr, m.updatePath, defcfg.TypeGauge, path)
 
 	req, err := http.NewRequest(http.MethodPost, u, http.NoBody)
 	if err != nil {
@@ -49,7 +47,7 @@ func (m *MonClient) PostGauge(name string, v float64) {
 
 func (m *MonClient) PostCounter(name string, v int64) {
 	path := name + "/" + strconv.FormatInt(v, 10)
-	u := fmt.Sprintf("%s/%s/%s/%s", m.baseURL, m.updatePath, defcfg.TypeCounter, path)
+	u := fmt.Sprintf("%s/%s/%s/%s", m.addr, m.updatePath, defcfg.TypeCounter, path)
 
 	req, err := http.NewRequest(http.MethodPost, u, http.NoBody)
 	if err != nil {
