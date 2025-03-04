@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"os"
 
 	monserv "github.com/Allegathor/perfmon/internal/monserv"
 )
@@ -17,7 +18,10 @@ var defOpts = flags{
 }
 
 func init() {
-	flag.StringVar(&opts.addr, "a", defOpts.addr, "address to runing a server on")
+	opts.addr = os.Getenv("ADDRESS")
+	if opts.addr == "" {
+		flag.StringVar(&opts.addr, "a", defOpts.addr, "address to runing a server on")
+	}
 }
 
 func main() {

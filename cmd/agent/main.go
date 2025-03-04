@@ -2,7 +2,9 @@ package main
 
 import (
 	"flag"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	collector "github.com/Allegathor/perfmon/internal/collector"
@@ -21,28 +23,51 @@ var defOpts = flags{
 	pollInterval:   2,
 }
 
+func setAddr(value string, defaultValue string) string {
+	hasProto := strings.Contains(value, "http://") || strings.Contains(value, "https://")
+	if !hasProto {
+		value = "http://" + value
+	}
+
+	matched, _ := regexp.MatchString(`.+(\w+|\w+\.\w+):{1}\d+`, value)
+	if !matched {
+		return defaultValue
+	}
+
+	return value
+}
+
 var opts flags
 
 func init() {
 	opts.addr = defOpts.addr
-	flag.Func("a", "address of a server to send metrics", func(flagValue string) error {
-		addr := flagValue
-		hasProto := strings.Contains(flagValue, "http://") || strings.Contains(flagValue, "https://")
-		if !hasProto {
-			addr = "http://" + addr
-		}
+	envAddr := os.Getenv("ADDRESS")
 
-		matched, _ := regexp.MatchString(`.+(\w+|\w+\.\w+):{1}\d+`, addr)
-		if !matched {
+	if envAddr != "" {
+		opts.addr = setAddr(envAddr, defOpts.addr)
+	} else {
+		flag.Func("a", "address of a server to send metrics", func(flagValue string) error {
+			opts.addr = setAddr(flagValue, defOpts.addr)
 			return nil
-		}
+		})
+	}
 
-		opts.addr = addr
-		return nil
-	})
+	envr := os.Getenv("REPORT_INTERVAL")
+	r, err := strconv.ParseUint(envr, 10, 32)
+	if err != nil {
+		opts.reportInterval = uint(r)
+	} else {
+		flag.UintVar(&opts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
+	}
 
-	flag.UintVar(&opts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
-	flag.UintVar(&opts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
+	envp := os.Getenv("POLL_INTERVAL")
+	p, err := strconv.ParseUint(envp, 10, 32)
+	if err != nil {
+		opts.reportInterval = uint(p)
+	} else {
+		flag.UintVar(&opts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
+	}
+
 }
 
 func main() {
