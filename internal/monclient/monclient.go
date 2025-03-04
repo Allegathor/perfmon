@@ -30,7 +30,7 @@ func NewInstance(base string, p int, interval uint8) *MonClient {
 }
 
 func (m *MonClient) PostGauge(name string, v float64) {
-	path := name + "/" + strconv.FormatFloat(v, 'f', 3, 64)
+	path := name + "/" + strconv.FormatFloat(v, 'f', 2, 64)
 	u := fmt.Sprintf("%s/%s/%s/%s", m.baseURL, m.updatePath, defcfg.TypeGauge, path)
 
 	req, err := http.NewRequest(http.MethodPost, u, http.NoBody)

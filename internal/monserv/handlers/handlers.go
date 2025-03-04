@@ -169,7 +169,7 @@ func CreateValueHandler(s *storage.MetricsStorage) http.HandlerFunc {
 		if t == defcfg.TypeGauge {
 
 			if v, ok := s.Gauge[n]; ok {
-				_, err := rw.Write([]byte(strconv.FormatFloat(v, 'f', 3, 64)))
+				_, err := rw.Write([]byte(strconv.FormatFloat(v, 'f', 2, 64)))
 				if err != nil {
 					http.Error(rw, "rw error", http.StatusInternalServerError)
 				}
