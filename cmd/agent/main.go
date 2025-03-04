@@ -2,8 +2,8 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"regexp"
+	"strings"
 
 	collector "github.com/Allegathor/perfmon/internal/collector"
 	"github.com/Allegathor/perfmon/internal/monclient"
@@ -26,13 +26,18 @@ var opts flags
 func init() {
 	opts.addr = defOpts.addr
 	flag.Func("a", "address of a server to send metrics", func(flagValue string) error {
-		matched, _ := regexp.MatchString(`https*://(\w+|\w+\.\w+):{1}\d+`, flagValue)
-		fmt.Println(flagValue, defOpts.addr)
+		addr := flagValue
+		hasProto := strings.Contains(flagValue, "http://") || strings.Contains(flagValue, "https://")
+		if !hasProto {
+			addr = "http://" + addr
+		}
+
+		matched, _ := regexp.MatchString(`.+(\w+|\w+\.\w+):{1}\d+`, addr)
 		if !matched {
 			return nil
 		}
 
-		opts.addr = flagValue
+		opts.addr = addr
 		return nil
 	})
 
