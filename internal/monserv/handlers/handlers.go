@@ -126,7 +126,6 @@ func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
 		t := chi.URLParam(req, defcfg.URLTypePath)
 		n := chi.URLParam(req, defcfg.URLNamePath)
 		v := chi.URLParam(req, defcfg.URLValuePath)
-		// fmt.Printf("%s, %s, %s", t, n, v)
 
 		if n == "" {
 			http.Error(rw, "name must contain a value", http.StatusNotFound)
@@ -169,7 +168,7 @@ func CreateValueHandler(s *storage.MetricsStorage) http.HandlerFunc {
 		if t == defcfg.TypeGauge {
 
 			if v, ok := s.Gauge[n]; ok {
-				_, err := rw.Write([]byte(strconv.FormatFloat(v, 'f', 3, 64)))
+				_, err := rw.Write([]byte(strconv.FormatFloat(v, 'f', -1, 64)))
 				if err != nil {
 					http.Error(rw, "rw error", http.StatusInternalServerError)
 				}
