@@ -53,17 +53,21 @@ func init() {
 	}
 
 	envr := os.Getenv("REPORT_INTERVAL")
-	r, err := strconv.ParseUint(envr, 10, 32)
-	if err != nil {
-		opts.reportInterval = uint(r)
+	if envr != "" {
+		r, err := strconv.ParseUint(envr, 10, 32)
+		if err != nil {
+			opts.reportInterval = uint(r)
+		}
 	} else {
 		flag.UintVar(&opts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
 	}
 
 	envp := os.Getenv("POLL_INTERVAL")
-	p, err := strconv.ParseUint(envp, 10, 32)
-	if err != nil {
-		opts.reportInterval = uint(p)
+	if envp != "" {
+		p, err := strconv.ParseUint(envp, 10, 32)
+		if err != nil {
+			opts.reportInterval = uint(p)
+		}
 	} else {
 		flag.UintVar(&opts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
 	}
