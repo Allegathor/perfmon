@@ -22,8 +22,8 @@ func (s *MetricsStorage) SetGauge(name string, v float64) {
 }
 
 func (s *MetricsStorage) SetCounter(name string, v int64) {
-	// if _, ok := s.Counter[name]; ok {
-	// 	s.Counter[name] += v
-	// }
+	if _, ok := s.Counter[name]; ok {
+		s.Counter[name] += v
+	}
 	s.Counter[name] = v
 }
