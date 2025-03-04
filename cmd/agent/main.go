@@ -26,7 +26,7 @@ var opts flags
 func init() {
 	opts.addr = defOpts.addr
 	flag.Func("a", "address of a server to send metrics", func(flagValue string) error {
-		matched, _ := regexp.MatchString(`https*://(\w+|\w+\.\w+):{1}\d{2,4}`, flagValue)
+		matched, _ := regexp.MatchString(`https*://(\w+|\w+\.\w+):{1}\d+`, flagValue)
 		fmt.Println(flagValue, defOpts.addr)
 		if !matched {
 			return nil
