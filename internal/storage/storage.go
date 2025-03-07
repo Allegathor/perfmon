@@ -4,10 +4,12 @@ type Storage interface {
 	SetGauge(name string, v float64)
 	UpdateCounter(name string, v int64)
 }
+type Gauge map[string]float64
+type Counter map[string]int64
 
 type MetricsStorage struct {
-	Gauge   map[string]float64
-	Counter map[string]int64
+	Gauge   Gauge
+	Counter Counter
 }
 
 func NewMetrics() *MetricsStorage {

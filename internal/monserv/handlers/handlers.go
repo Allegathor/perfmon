@@ -1,8 +1,9 @@
 package handlers
 
 import (
-	"fmt"
+	"html/template"
 	"net/http"
+	"os"
 	"strconv"
 
 	defcfg "github.com/Allegathor/perfmon/internal"
@@ -12,110 +13,25 @@ import (
 
 func CreateRootHandler(s *storage.MetricsStorage) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
-		htmlStr := `
-		<!DOCTYPE html>
-		<html lang="en">
-		<head>
-			<meta charset="UTF-8">
-			<meta name="viewport" content="width=device-width, initial-scale=1.0">
-			<title>Metrics</title>
-			<style>
-				table {
-					border-collapse: collapse;
-					border: 2px solid rgb(140 140 140);
-					font-family: sans-serif;
-					font-size: 0.8rem;
-					letter-spacing: 1px;
-				}
-
-				caption {
-					caption-side: bottom;
-					padding: 10px;
-					font-weight: bold;
-				}
-
-				thead,
-				tfoot {
-					background-color: rgb(228 240 245);
-				}
-
-				th,
-				td {
-					border: 1px solid rgb(160 160 160);
-					padding: 8px 10px;
-				}
-
-				td:last-of-type {
-					text-align: center;
-				}
-
-				tbody > tr:nth-of-type(even) {
-					background-color: rgb(237 238 242);
-				}
-
-				tfoot th {
-					text-align: right;
-				}
-
-				tfoot td {
-					font-weight: bold;
-				}
-			</style>
-		</head>
-		<body>
-		`
-		htmlStr += fmt.Sprintf("<table>\n<caption>%s</caption>\n", defcfg.TypeCounter)
-		htmlStr += `
-			<thead>
-				<tr>
-					<th scope="col">Name</th>
-					<th scope="col">Value</th>
-				</tr>
-			</thead>
-			<tbody>
-		`
-		for k, v := range s.Counter {
-			tr := `
-				<tr>
-					<th scope="row">%s</th>
-					<td>%d</td>
-				</tr>
-			`
-			htmlStr += fmt.Sprintf(tr, k, v)
+		type Value interface {
+			storage.Gauge | storage.Counter
 		}
-		htmlStr += `
-			</tbody>
-		</table>
-		`
-
-		htmlStr += fmt.Sprintf("<table>\n<caption>%s</caption>\n", defcfg.TypeGauge)
-		htmlStr += `
-			<thead>
-				<tr>
-					<th scope="col">Name</th>
-					<th scope="col">Value</th>
-				</tr>
-			</thead>
-			<tbody>
-		`
-		for k, v := range s.Gauge {
-			tr := `
-				<tr>
-					<th scope="row">%s</th>
-					<td>%f</td>
-				</tr>
-			`
-			htmlStr += fmt.Sprintf(tr, k, v)
+		type Table[T Value] struct {
+			Name    string
+			Content T
 		}
-		htmlStr += `
-			</tbody>
-		</table>
-		</body>
-		`
-		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, err := rw.Write([]byte(htmlStr))
+
+		viewData := []any{
+			Table[storage.Counter]{Name: "Counter", Content: s.Counter},
+			Table[storage.Gauge]{Name: "Gauge", Content: s.Gauge},
+		}
+
+		dir, _ := os.Getwd()
+		t := template.Must(template.New("index.html").ParseFiles(dir + "/templates/index.html"))
+
+		err := t.Execute(rw, viewData)
 		if err != nil {
-			http.Error(rw, "rw error", http.StatusInternalServerError)
+			http.Error(rw, err.Error(), http.StatusInternalServerError)
 		}
 	}
 }
