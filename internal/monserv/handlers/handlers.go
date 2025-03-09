@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func CreateRootHandler(s *storage.MetricsStorage) http.HandlerFunc {
+func CreateRootHandler(s *storage.MetricsStorage, path string) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		type Value interface {
 			storage.Gauge | storage.Counter
@@ -26,12 +26,20 @@ func CreateRootHandler(s *storage.MetricsStorage) http.HandlerFunc {
 			Table[storage.Gauge]{Name: "Gauge", Content: s.Gauge},
 		}
 
-		dir, _ := os.Getwd()
-		t := template.Must(template.New("index.html").ParseFiles(dir + "/templates/index.html"))
+		if path == "" {
+			dir, _ := os.Getwd()
+			path = dir + "/templates/index.html"
+		}
 
-		err := t.Execute(rw, viewData)
+		t, err := template.New("index.html").ParseFiles(path)
 		if err != nil {
-			http.Error(rw, err.Error(), http.StatusInternalServerError)
+			http.Error(rw, "file parsing error", http.StatusInternalServerError)
+			return
+		}
+
+		err = t.Execute(rw, viewData)
+		if err != nil {
+			http.Error(rw, "template execution error", http.StatusInternalServerError)
 		}
 	}
 }
@@ -52,6 +60,7 @@ func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
 			gv, err := strconv.ParseFloat(v, 64)
 			if err != nil {
 				http.Error(rw, "invalid value", http.StatusBadRequest)
+				return
 			}
 			s.SetGauge(n, gv)
 			rw.WriteHeader(http.StatusOK)
@@ -60,6 +69,7 @@ func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
 			cv, err := strconv.ParseInt(v, 10, 64)
 			if err != nil {
 				http.Error(rw, "invalid value", http.StatusBadRequest)
+				return
 			}
 			s.SetCounter(n, cv)
 			rw.WriteHeader(http.StatusOK)

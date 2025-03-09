@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"net/http"
 	"os"
 
 	monserv "github.com/Allegathor/perfmon/internal/monserv"
@@ -26,8 +27,9 @@ func init() {
 
 func main() {
 	flag.Parse()
-	ms := monserv.NewInstance(opts.addr)
-	err := ms.Run()
+	s := monserv.NewInstance(opts.addr)
+	s.MountHandlers()
+	err := http.ListenAndServe(opts.addr, s.Router)
 
 	if err != nil {
 		panic(err.Error())

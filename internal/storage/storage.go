@@ -2,7 +2,7 @@ package storage
 
 type Storage interface {
 	SetGauge(name string, v float64)
-	UpdateCounter(name string, v int64)
+	SetCounter(name string, v int64)
 }
 type Gauge map[string]float64
 type Counter map[string]int64
