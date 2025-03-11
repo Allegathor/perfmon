@@ -15,7 +15,7 @@ type Collector struct {
 	pollInterval uint
 }
 
-func New(pollInterval uint8) *Collector {
+func New(pollInterval uint) *Collector {
 	m := Mtcs{
 		Gauge:   make(map[string]float64),
 		Counter: make(map[string]int64),

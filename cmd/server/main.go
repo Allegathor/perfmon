@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"net/http"
+	"os"
 
 	monserv "github.com/Allegathor/perfmon/internal/monserv"
 )
@@ -17,13 +19,17 @@ var defOpts = flags{
 }
 
 func init() {
-	flag.StringVar(&opts.addr, "a", defOpts.addr, "address to runing a server on")
+	opts.addr = os.Getenv("ADDRESS")
+	if opts.addr == "" {
+		flag.StringVar(&opts.addr, "a", defOpts.addr, "address to runing a server on")
+	}
 }
 
 func main() {
 	flag.Parse()
-	ms := monserv.NewInstance(opts.addr)
-	err := ms.Run()
+	s := monserv.NewInstance(opts.addr)
+	s.MountHandlers()
+	err := http.ListenAndServe(opts.addr, s.Router)
 
 	if err != nil {
 		panic(err.Error())
