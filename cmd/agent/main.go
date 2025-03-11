@@ -71,7 +71,6 @@ func init() {
 	} else {
 		flag.UintVar(&opts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
 	}
-
 }
 
 func main() {

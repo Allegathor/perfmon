@@ -8,8 +8,8 @@ type Gauge map[string]float64
 type Counter map[string]int64
 
 type MetricsStorage struct {
-	Gauge   Gauge
-	Counter Counter
+	Gauge   map[string]float64
+	Counter map[string]int64
 }
 
 func NewMetrics() *MetricsStorage {
