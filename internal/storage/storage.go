@@ -28,4 +28,3 @@ func (s *MetricsStorage) SetCounter(name string, v int64) {
 	}
 	s.Counter[name] = v
 }
-

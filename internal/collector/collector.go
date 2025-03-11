@@ -12,7 +12,7 @@ type Mtcs struct {
 
 type Collector struct {
 	mtcs         Mtcs
-	pollInterval uint8
+	pollInterval uint
 }
 
 func New(pollInterval uint8) *Collector {
