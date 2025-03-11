@@ -6,27 +6,39 @@ import (
 
 	"github.com/Allegathor/perfmon/internal/monserv/handlers"
 	"github.com/Allegathor/perfmon/internal/storage"
+	"github.com/go-chi/chi/v5"
 )
 
 type MonServ struct {
+	r    chi.Router
 	port int
 	mux  *http.ServeMux
 }
 
 func NewInstance(port int) *MonServ {
-	s := &MonServ{
+	mon := &MonServ{
+		r:    chi.NewRouter(),
 		port: port,
 		mux:  http.NewServeMux(),
 	}
 
-	return s
+	return mon
 }
 
-func (s *MonServ) Run() error {
-	addr := fmt.Sprintf(":%d", s.port)
+func (mon *MonServ) Run() error {
+	addr := fmt.Sprintf(":%d", mon.port)
 	ms := storage.NewMetrics()
-	s.mux.HandleFunc("/update/{type}/{name}/{value}", handlers.CreateUpdateHandler(ms))
-	s.mux.HandleFunc("/history/", handlers.CreateHistoryHandler(ms))
+	mon.r.Get("/", handlers.CreateRootHandler(ms))
+	mon.r.Route("/update", func(r chi.Router) {
+		r.Route("/{type}/{name}/{value}", func(r chi.Router) {
+			r.Post("/", handlers.CreateUpdateHandler(ms))
+		})
+	})
+	mon.r.Route("/value", func(r chi.Router) {
+		r.Route("/{type}/{name}", func(r chi.Router) {
+			r.Get("/", handlers.CreateValueHandler(ms))
+		})
+	})
 
-	return http.ListenAndServe(addr, s.mux)
+	return http.ListenAndServe(addr, mon.r)
 }

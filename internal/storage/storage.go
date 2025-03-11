@@ -1,29 +1,31 @@
 package storage
 
 type Storage interface {
-	Add(rec MetricRec)
-	GetHistory() []MetricRec
-}
-
-type MetricRec struct {
-	ValueType  string
-	Name       string
-	GaugeVal   float64
-	CounterVal int64
+	SetGauge(name string, v float64)
+	UpdateCounter(name string, v int64)
 }
 
 type MetricsStorage struct {
-	list []MetricRec
+	Gauge   map[string]float64
+	Counter map[string]int64
 }
 
 func NewMetrics() *MetricsStorage {
-	return &MetricsStorage{}
+	return &MetricsStorage{
+		Gauge:   make(map[string]float64),
+		Counter: make(map[string]int64),
+	}
 }
 
-func (s *MetricsStorage) Add(rec MetricRec) {
-	s.list = append(s.list, rec)
+func (s *MetricsStorage) SetGauge(name string, v float64) {
+	s.Gauge[name] = v
 }
 
-func (s *MetricsStorage) GetHistory() []MetricRec {
-	return s.list
+func (s *MetricsStorage) SetCounter(name string, v int64) {
+	if _, ok := s.Counter[name]; ok {
+		s.Counter[name] += v
+		return
+	}
+	s.Counter[name] = v
 }
+
