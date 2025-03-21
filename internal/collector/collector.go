@@ -31,11 +31,6 @@ func (c *Collector) SetGauge(k string, g float64) {
 }
 
 func (c *Collector) SetCounter(k string, counter int64) {
-	// if _, ok := c.mtcs.Counter[k]; ok {
-	// 	c.mtcs.Counter[k] += counter
-	// 	return
-	// }
-
 	c.mtcs.Counter[k] = counter
 }
 
@@ -43,13 +38,13 @@ func (c *Collector) GaugeStats() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	// total
-	// c.SetGauge(Gauge{name: "alloc", value: float64(m.Alloc)})
 	c.SetGauge("TotalAlloc", float64(m.TotalAlloc))
 	c.SetGauge("Sys", float64(m.Sys))
 	c.SetGauge("Lookups", float64(m.Lookups))
 	c.SetGauge("Mallocs", float64(m.Mallocs))
 	c.SetGauge("Frees", float64(m.Frees))
 
+	c.SetGauge("Alloc", float64(m.Alloc))
 	c.SetGauge("BuckHashSys", float64(m.BuckHashSys))
 
 	// heap

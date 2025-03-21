@@ -4,17 +4,31 @@ import (
 	"html/template"
 	"net/http"
 	"os"
-	"strconv"
 
-	defcfg "github.com/Allegathor/perfmon/internal"
-	"github.com/Allegathor/perfmon/internal/storage"
+	"github.com/Allegathor/perfmon/internal/mondata"
 	"github.com/go-chi/chi/v5"
 )
 
-func CreateRootHandler(s *storage.MetricsStorage, path string) http.HandlerFunc {
+const (
+	URLPathType  = "type"
+	URLPathName  = "name"
+	URLPathValue = "value"
+)
+
+type MetricsStorage interface {
+	SetGauge(string, float64)
+	GetGauge(string) (float64, bool)
+	GetGaugeAll() map[string]float64
+
+	SetCounter(string, int64)
+	GetCounter(string) (int64, bool)
+	GetCounterAll() map[string]int64
+}
+
+func CreateRootHandler(s MetricsStorage, path string) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		type Value interface {
-			storage.Gauge | storage.Counter
+			map[string]float64 | map[string]int64
 		}
 		type Table[T Value] struct {
 			Name    string
@@ -22,8 +36,8 @@ func CreateRootHandler(s *storage.MetricsStorage, path string) http.HandlerFunc 
 		}
 
 		viewData := []any{
-			Table[storage.Counter]{Name: "Counter", Content: s.Counter},
-			Table[storage.Gauge]{Name: "Gauge", Content: s.Gauge},
+			Table[map[string]int64]{Name: "Counter", Content: s.GetCounterAll()},
+			Table[map[string]float64]{Name: "Gauge", Content: s.GetGaugeAll()},
 		}
 
 		if path == "" {
@@ -44,20 +58,20 @@ func CreateRootHandler(s *storage.MetricsStorage, path string) http.HandlerFunc 
 	}
 }
 
-func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
+func CreateUpdateHandler(s MetricsStorage) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 
-		t := chi.URLParam(req, defcfg.URLTypePath)
-		n := chi.URLParam(req, defcfg.URLNamePath)
-		v := chi.URLParam(req, defcfg.URLValuePath)
+		t := chi.URLParam(req, URLPathType)
+		n := chi.URLParam(req, URLPathName)
+		v := chi.URLParam(req, URLPathValue)
 
 		if n == "" {
 			http.Error(rw, "name must contain a value", http.StatusNotFound)
 			return
 		}
 
-		if t == defcfg.TypeGauge {
-			gv, err := strconv.ParseFloat(v, 64)
+		if t == mondata.GaugeType {
+			gv, err := mondata.ParseGauge(v)
 			if err != nil {
 				http.Error(rw, "invalid value", http.StatusBadRequest)
 				return
@@ -65,8 +79,8 @@ func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
 			s.SetGauge(n, gv)
 			rw.WriteHeader(http.StatusOK)
 
-		} else if t == defcfg.TypeCounter {
-			cv, err := strconv.ParseInt(v, 10, 64)
+		} else if t == mondata.CounterType {
+			cv, err := mondata.ParseCounter(v)
 			if err != nil {
 				http.Error(rw, "invalid value", http.StatusBadRequest)
 				return
@@ -81,20 +95,20 @@ func CreateUpdateHandler(s *storage.MetricsStorage) http.HandlerFunc {
 	}
 }
 
-func CreateValueHandler(s *storage.MetricsStorage) http.HandlerFunc {
+func CreateValueHandler(s MetricsStorage) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
-		t := req.PathValue(defcfg.URLTypePath)
-		n := req.PathValue(defcfg.URLNamePath)
+		t := chi.URLParam(req, URLPathType)
+		n := chi.URLParam(req, URLPathName)
 
 		if n == "" {
 			http.Error(rw, "name must contain a value", http.StatusNotFound)
 			return
 		}
 
-		if t == defcfg.TypeGauge {
+		if t == mondata.GaugeType {
 
-			if v, ok := s.Gauge[n]; ok {
-				_, err := rw.Write([]byte(strconv.FormatFloat(v, 'f', -1, 64)))
+			if v, ok := s.GetGauge(n); ok {
+				_, err := rw.Write([]byte(mondata.FormatGauge(v)))
 				if err != nil {
 					http.Error(rw, "rw error", http.StatusInternalServerError)
 				}
@@ -103,9 +117,9 @@ func CreateValueHandler(s *storage.MetricsStorage) http.HandlerFunc {
 
 			http.Error(rw, "value doesn't exist in storage", http.StatusNotFound)
 
-		} else if t == defcfg.TypeCounter {
-			if v, ok := s.Counter[n]; ok {
-				_, err := rw.Write([]byte(strconv.FormatInt(v, 10)))
+		} else if t == mondata.CounterType {
+			if v, ok := s.GetCounter(n); ok {
+				_, err := rw.Write([]byte(mondata.FormatCounter(v)))
 				if err != nil {
 					http.Error(rw, "rw error", http.StatusInternalServerError)
 				}

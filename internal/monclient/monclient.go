@@ -3,11 +3,9 @@ package monclient
 import (
 	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
-	defcfg "github.com/Allegathor/perfmon/internal"
+	"github.com/Allegathor/perfmon/internal/mondata"
 )
 
 type MonClient struct {
@@ -29,8 +27,8 @@ func NewInstance(addr string, interval uint) *MonClient {
 }
 
 func (m *MonClient) PostGauge(name string, v float64) {
-	path := name + "/" + strings.TrimRight(strconv.FormatFloat(v, 'f', -1, 64), "0.")
-	u := fmt.Sprintf("%s/%s/%s/%s", m.addr, m.updatePath, defcfg.TypeGauge, path)
+	path := name + "/" + mondata.FormatGauge(v)
+	u := fmt.Sprintf("%s/%s/%s/%s", m.addr, m.updatePath, mondata.GaugeType, path)
 
 	req, err := http.NewRequest(http.MethodPost, u, http.NoBody)
 	if err != nil {
@@ -46,8 +44,8 @@ func (m *MonClient) PostGauge(name string, v float64) {
 }
 
 func (m *MonClient) PostCounter(name string, v int64) {
-	path := name + "/" + strconv.FormatInt(v, 10)
-	u := fmt.Sprintf("%s/%s/%s/%s", m.addr, m.updatePath, defcfg.TypeCounter, path)
+	path := name + "/" + mondata.FormatCounter(v)
+	u := fmt.Sprintf("%s/%s/%s/%s", m.addr, m.updatePath, mondata.CounterType, path)
 
 	req, err := http.NewRequest(http.MethodPost, u, http.NoBody)
 	if err != nil {
