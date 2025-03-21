@@ -68,8 +68,8 @@ func TestCreateUpdateHandler(t *testing.T) {
 				},
 			),
 			storage: &storage.MetricsStorage{
-				Gauge: make(storage.Gauge),
-				Counter: storage.Counter{
+				Gauge: make(storage.GaugeMap),
+				Counter: storage.CounterMap{
 					"PollCount": 56,
 				},
 			},

@@ -1,26 +1,40 @@
 package storage
 
-type Storage interface {
-	SetGauge(name string, v float64)
-	SetCounter(name string, v int64)
-}
-type Gauge map[string]float64
-type Counter map[string]int64
+type GaugeMap = map[string]float64
+type CounterMap = map[string]int64
 
 type MetricsStorage struct {
-	Gauge   map[string]float64
-	Counter map[string]int64
+	Gauge   GaugeMap
+	Counter CounterMap
 }
 
 func NewMetrics() *MetricsStorage {
 	return &MetricsStorage{
-		Gauge:   make(map[string]float64),
-		Counter: make(map[string]int64),
+		Gauge:   make(GaugeMap),
+		Counter: make(CounterMap),
 	}
+}
+
+func (s *MetricsStorage) GetGauge(name string) (float64, bool) {
+	v, ok := s.Gauge[name]
+	return v, ok
+}
+
+func (s *MetricsStorage) GetGaugeAll() GaugeMap {
+	return s.Gauge
 }
 
 func (s *MetricsStorage) SetGauge(name string, v float64) {
 	s.Gauge[name] = v
+}
+
+func (s *MetricsStorage) GetCounter(name string) (int64, bool) {
+	v, ok := s.Counter[name]
+	return v, ok
+}
+
+func (s *MetricsStorage) GetCounterAll() CounterMap {
+	return s.Counter
 }
 
 func (s *MetricsStorage) SetCounter(name string, v int64) {
