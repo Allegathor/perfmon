@@ -6,6 +6,8 @@ import (
 	"os"
 
 	monserv "github.com/Allegathor/perfmon/internal/monserv"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type flags struct {
@@ -25,11 +27,40 @@ func init() {
 	}
 }
 
+func initLogger(f *os.File) *zap.Logger {
+	std := zapcore.AddSync(os.Stdout)
+
+	devcfg := zap.NewDevelopmentEncoderConfig()
+	devcfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	prodcfg := zap.NewProductionEncoderConfig()
+	fileEncoder := zapcore.NewJSONEncoder(prodcfg)
+
+	consoleEncoder := zapcore.NewConsoleEncoder(devcfg)
+	core := zapcore.NewTee(
+		zapcore.NewCore(consoleEncoder, std, zapcore.InfoLevel),
+		zapcore.NewCore(fileEncoder, zapcore.AddSync(f), zapcore.InfoLevel),
+	)
+
+	l := zap.New(core)
+	defer l.Sync()
+
+	return l
+}
+
 func main() {
 	flag.Parse()
-	s := monserv.NewInstance(opts.addr)
+
+	var err error
+	f, err := os.OpenFile("logs/server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		panic(err)
+	}
+	logger := initLogger(f).Sugar()
+
+	s := monserv.NewInstance(opts.addr, logger)
 	s.MountHandlers()
-	err := http.ListenAndServe(opts.addr, s.Router)
+	logger.Infow("starting server", "addr:", opts.addr)
+	err = http.ListenAndServe(opts.addr, s.Router)
 
 	if err != nil {
 		panic(err.Error())
