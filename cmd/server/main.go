@@ -27,18 +27,18 @@ func init() {
 	}
 }
 
-func initLogger(f *os.File) *zap.Logger {
+func initLogger( /*f *os.File*/ ) *zap.Logger {
 	std := zapcore.AddSync(os.Stdout)
 
 	devcfg := zap.NewDevelopmentEncoderConfig()
 	devcfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	prodcfg := zap.NewProductionEncoderConfig()
-	fileEncoder := zapcore.NewJSONEncoder(prodcfg)
+	// prodcfg := zap.NewProductionEncoderConfig()
+	// fileEncoder := zapcore.NewJSONEncoder(prodcfg)
 
 	consoleEncoder := zapcore.NewConsoleEncoder(devcfg)
 	core := zapcore.NewTee(
 		zapcore.NewCore(consoleEncoder, std, zapcore.InfoLevel),
-		zapcore.NewCore(fileEncoder, zapcore.AddSync(f), zapcore.InfoLevel),
+		// zapcore.NewCore(fileEncoder, zapcore.AddSync(f), zapcore.InfoLevel),
 	)
 
 	l := zap.New(core)
@@ -51,11 +51,11 @@ func main() {
 	flag.Parse()
 
 	var err error
-	f, err := os.OpenFile("logs/server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		panic(err)
-	}
-	logger := initLogger(f).Sugar()
+	// f, err := os.OpenFile("logs/server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	// if err != nil {
+	// 	Info(err)
+	// }
+	logger := initLogger().Sugar()
 
 	s := monserv.NewInstance(opts.addr, logger)
 	s.MountHandlers()
