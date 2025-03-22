@@ -2,25 +2,28 @@ package monserv
 
 import (
 	"github.com/Allegathor/perfmon/internal/monserv/handlers"
+	"github.com/Allegathor/perfmon/internal/monserv/middlewares"
 	"github.com/Allegathor/perfmon/internal/storage"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"go.uber.org/zap"
 )
 
 type MonServ struct {
 	Router *chi.Mux
+	Logger *zap.SugaredLogger
 }
 
-func NewInstance(addr string) *MonServ {
+func NewInstance(addr string, l *zap.SugaredLogger) *MonServ {
 	mon := &MonServ{
 		Router: chi.NewRouter(),
+		Logger: l,
 	}
 
 	return mon
 }
 
 func (mon *MonServ) MountHandlers() {
-	mon.Router.Use(middleware.Logger)
+	mon.Router.Use(middlewares.CreateLogger(mon.Logger))
 
 	ms := storage.NewMetrics()
 	mon.Router.Get("/", handlers.CreateRootHandler(ms, ""))
