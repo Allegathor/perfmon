@@ -28,7 +28,7 @@ func init() {
 		flag.StringVar(&opts.addr, "a", defOpts.addr, "address to runing a server on")
 	}
 	if opts.mode == "" {
-		flag.StringVar(&opts.mode, "m", defOpts.mode, "set dev or production mode")
+		flag.StringVar(&opts.mode, "m", defOpts.mode, "set dev or prod mode")
 	}
 }
 
