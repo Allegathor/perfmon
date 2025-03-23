@@ -12,12 +12,14 @@ import (
 
 type flags struct {
 	addr string
+	mode string
 }
 
 var opts flags
 
 var defOpts = flags{
 	addr: "localhost:8080",
+	mode: "dev",
 }
 
 func init() {
@@ -25,21 +27,36 @@ func init() {
 	if opts.addr == "" {
 		flag.StringVar(&opts.addr, "a", defOpts.addr, "address to runing a server on")
 	}
+	if opts.mode == "" {
+		flag.StringVar(&opts.mode, "m", defOpts.mode, "set dev or production mode")
+	}
 }
 
-func initLogger( /*f *os.File*/ ) *zap.Logger {
-	std := zapcore.AddSync(os.Stdout)
+func initLogger(mode string) *zap.Logger {
+	var core zapcore.Core
+	if mode == "prod" {
+		f, err := os.OpenFile("logs/server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			panic(err)
+		}
 
-	devcfg := zap.NewDevelopmentEncoderConfig()
-	devcfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	// prodcfg := zap.NewProductionEncoderConfig()
-	// fileEncoder := zapcore.NewJSONEncoder(prodcfg)
+		prodcfg := zap.NewProductionEncoderConfig()
+		fileEncoder := zapcore.NewJSONEncoder(prodcfg)
+		sync := zapcore.AddSync(f)
+		core = zapcore.NewTee(
+			zapcore.NewCore(fileEncoder, sync, zapcore.InfoLevel),
+		)
+	} else {
+		std := zapcore.AddSync(os.Stdout)
 
-	consoleEncoder := zapcore.NewConsoleEncoder(devcfg)
-	core := zapcore.NewTee(
-		zapcore.NewCore(consoleEncoder, std, zapcore.InfoLevel),
-		// zapcore.NewCore(fileEncoder, zapcore.AddSync(f), zapcore.InfoLevel),
-	)
+		devcfg := zap.NewDevelopmentEncoderConfig()
+		devcfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
+
+		consoleEncoder := zapcore.NewConsoleEncoder(devcfg)
+		core = zapcore.NewTee(
+			zapcore.NewCore(consoleEncoder, std, zapcore.InfoLevel),
+		)
+	}
 
 	l := zap.New(core)
 	defer l.Sync()
@@ -51,11 +68,7 @@ func main() {
 	flag.Parse()
 
 	var err error
-	// f, err := os.OpenFile("logs/server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	// if err != nil {
-	// 	Info(err)
-	// }
-	logger := initLogger().Sugar()
+	logger := initLogger(opts.mode).Sugar()
 
 	s := monserv.NewInstance(opts.addr, logger)
 	s.MountHandlers()
