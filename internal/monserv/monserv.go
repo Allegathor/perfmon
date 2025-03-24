@@ -28,6 +28,7 @@ func (mon *MonServ) MountHandlers() {
 	ms := storage.NewMetrics()
 	mon.Router.Get("/", handlers.CreateRootHandler(ms, ""))
 	mon.Router.Route("/update", func(r chi.Router) {
+		r.Post("/", handlers.CreateUpdateRootHandler(ms))
 		r.Route("/{type}/{name}/{value}", func(r chi.Router) {
 			r.Post("/", handlers.CreateUpdateHandler(ms))
 		})

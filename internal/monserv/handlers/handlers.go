@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"html/template"
 	"net/http"
 	"os"
@@ -14,6 +17,30 @@ const (
 	URLPathName  = "name"
 	URLPathValue = "value"
 )
+
+type RespError struct {
+	err error
+	msg string
+}
+
+func NewRespError(msg string, err error) *RespError {
+	if msg == "" {
+		msg = err.Error()
+	}
+
+	return &RespError{
+		err,
+		msg,
+	}
+}
+
+func (re *RespError) Error() string {
+	return re.err.Error()
+}
+
+func (re *RespError) Msg() string {
+	return re.msg
+}
 
 type MetricsStorage interface {
 	SetGauge(string, float64)
@@ -58,38 +85,87 @@ func CreateRootHandler(s MetricsStorage, path string) http.HandlerFunc {
 	}
 }
 
-func CreateUpdateHandler(s MetricsStorage) http.HandlerFunc {
-	return func(rw http.ResponseWriter, req *http.Request) {
+func updateMetrics(m *mondata.Metrics, s MetricsStorage) (int, *RespError) {
+	var (
+		err error
+		v   float64
+		d   int64
+	)
 
-		t := chi.URLParam(req, URLPathType)
-		n := chi.URLParam(req, URLPathName)
-		v := chi.URLParam(req, URLPathValue)
+	if m.ID == "" {
+		return http.StatusNotFound, NewRespError("name must contain a value", err)
+	}
 
-		if n == "" {
-			http.Error(rw, "name must contain a value", http.StatusNotFound)
-			return
+	if m.MType == mondata.GaugeType {
+		if m.PValue != "" {
+			v, err = mondata.ParseGauge(m.PValue)
+			m.Value = &v
+			if err != nil {
+				return http.StatusBadRequest, NewRespError("invalid value", err)
+			}
 		}
 
-		if t == mondata.GaugeType {
-			gv, err := mondata.ParseGauge(v)
+		s.SetGauge(m.ID, *m.Value)
+		return http.StatusOK, nil
+
+	} else if m.MType == mondata.CounterType {
+		if m.PValue != "" {
+			d, err = mondata.ParseCounter(m.PValue)
+			m.Delta = &d
 			if err != nil {
-				http.Error(rw, "invalid value", http.StatusBadRequest)
+				return http.StatusBadRequest, NewRespError("invalid value", err)
+			}
+		}
+
+		s.SetCounter(m.ID, *m.Delta)
+		return http.StatusOK, nil
+
+	}
+
+	return http.StatusBadRequest, NewRespError("", errors.New("incorrect request type"))
+}
+
+func CreateUpdateHandler(s MetricsStorage) http.HandlerFunc {
+	return func(rw http.ResponseWriter, req *http.Request) {
+		var m = &mondata.Metrics{}
+
+		m.MType = chi.URLParam(req, URLPathType)
+		m.ID = chi.URLParam(req, URLPathName)
+		m.PValue = chi.URLParam(req, URLPathValue)
+		code, err := updateMetrics(m, s)
+		if err != nil {
+			http.Error(rw, err.Msg(), code)
+		}
+
+		rw.WriteHeader(code)
+	}
+}
+
+func CreateUpdateRootHandler(s MetricsStorage) http.HandlerFunc {
+	return func(rw http.ResponseWriter, req *http.Request) {
+		var err error
+		m := &mondata.Metrics{}
+
+		if req.Header.Get("Content-Type") == "application/json" {
+			var buf bytes.Buffer
+			_, err = buf.ReadFrom(req.Body)
+			if err != nil {
+				http.Error(rw, "reading body failed", http.StatusBadRequest)
 				return
 			}
-			s.SetGauge(n, gv)
-			rw.WriteHeader(http.StatusOK)
-
-		} else if t == mondata.CounterType {
-			cv, err := mondata.ParseCounter(v)
-			if err != nil {
-				http.Error(rw, "invalid value", http.StatusBadRequest)
+			if err = json.Unmarshal(buf.Bytes(), m); err != nil {
+				http.Error(rw, "unmarshaling failed", http.StatusBadRequest)
 				return
 			}
-			s.SetCounter(n, cv)
-			rw.WriteHeader(http.StatusOK)
 
+			code, err := updateMetrics(m, s)
+			if err != nil {
+				http.Error(rw, err.Msg(), code)
+			}
+
+			rw.WriteHeader(code)
 		} else {
-			http.Error(rw, "incorrect request type", http.StatusBadRequest)
+			http.Error(rw, "unsupported content type", http.StatusBadRequest)
 		}
 
 	}
