@@ -1,7 +1,8 @@
 package monclient
 
 import (
-	"fmt"
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -18,7 +19,7 @@ type MonClient struct {
 func NewInstance(addr string, interval uint) *MonClient {
 	m := &MonClient{
 		addr:         addr,
-		updatePath:   "update",
+		updatePath:   "/update",
 		pollInterval: interval,
 		Client:       &http.Client{},
 	}
@@ -26,31 +27,29 @@ func NewInstance(addr string, interval uint) *MonClient {
 	return m
 }
 
-func (m *MonClient) PostGauge(name string, v float64) {
-	path := name + "/" + mondata.FormatGauge(v)
-	u := fmt.Sprintf("%s/%s/%s/%s", m.addr, m.updatePath, mondata.GaugeType, path)
-
-	req, err := http.NewRequest(http.MethodPost, u, http.NoBody)
+func buildBuf(name string, mtype string, g *float64, c *int64) *bytes.Buffer {
+	data := &mondata.Metrics{
+		ID:    name,
+		MType: mtype,
+	}
+	if mtype == mondata.GaugeType {
+		data.Value = g
+	} else {
+		data.Delta = c
+	}
+	j, err := json.Marshal(data)
 	if err != nil {
 		panic(err)
 	}
-
-	resp, err := m.Do(req)
-	if err != nil {
-		panic(err)
-	}
-
-	resp.Body.Close()
+	return bytes.NewBuffer(j)
 }
 
-func (m *MonClient) PostCounter(name string, v int64) {
-	path := name + "/" + mondata.FormatCounter(v)
-	u := fmt.Sprintf("%s/%s/%s/%s", m.addr, m.updatePath, mondata.CounterType, path)
-
-	req, err := http.NewRequest(http.MethodPost, u, http.NoBody)
+func (m *MonClient) Post(buf *bytes.Buffer) {
+	req, err := http.NewRequest(http.MethodPost, m.addr+m.updatePath, buf)
 	if err != nil {
 		panic(err)
 	}
+	req.Header.Add("Content-Type", "application/json")
 
 	resp, err := m.Do(req)
 	if err != nil {
@@ -66,13 +65,15 @@ func (m *MonClient) PollStats(gm map[string]float64, cm map[string]int64) {
 		time.Sleep(time.Duration(m.pollInterval) * time.Second)
 		go func() {
 			for k, v := range gm {
-				m.PostGauge(k, v)
+				b := buildBuf(k, mondata.GaugeType, &v, nil)
+				m.Post(b)
 			}
 		}()
 
 		go func() {
 			for k, v := range cm {
-				m.PostCounter(k, v)
+				b := buildBuf(k, mondata.CounterType, nil, &v)
+				m.Post(b)
 			}
 
 		}()
