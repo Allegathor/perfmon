@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -15,6 +16,10 @@ import (
 )
 
 func WrapWithChiCtx(req *http.Request, params map[string]string) *http.Request {
+	if req.RequestURI == "/update" {
+		req.Header.Add("Content-Type", "application/json")
+	}
+
 	ctx := chi.NewRouteContext()
 	for k, v := range params {
 		ctx.URLParams.Add(k, v)
@@ -182,6 +187,159 @@ func TestCreateUpdateHandler(t *testing.T) {
 			h := CreateUpdateHandler(tt.storage)
 			r := chi.NewRouter()
 			r.Post("/update/{type}/{name}/{value}", h)
+			recorder := httptest.NewRecorder()
+			r.ServeHTTP(recorder, tt.req)
+
+			res := recorder.Result()
+			assert.Equal(t, tt.want.code, res.StatusCode)
+			assert.Equal(t, tt.want.contentType, res.Header.Get("Content-Type"))
+
+			_, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+
+			err = res.Body.Close()
+			require.NoError(t, err)
+
+			if tt.success {
+				assert.Contains(t, tt.storage.Counter, tt.want.key)
+				assert.Equal(t, tt.want.value, tt.storage.Counter[tt.want.key])
+			}
+
+		})
+	}
+}
+func TestCreateUpdateRootHandler(t *testing.T) {
+	type want[T int64 | float64] struct {
+		contentType string
+		code        int
+		errMsg      string
+		key         string
+		value       T
+	}
+	tests := []struct {
+		name    string
+		success bool
+		req     *http.Request
+		storage *storage.MetricsStorage
+		want    want[int64]
+	}{
+		{
+			name:    "positive test #1",
+			success: true,
+			req: WrapWithChiCtx(
+				httptest.NewRequest("POST", "/update",
+					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"counter","delta":99}`))),
+				nil),
+			storage: storage.NewMetrics(),
+			want: want[int64]{
+				contentType: "",
+				code:        200,
+				key:         "PollCount",
+				value:       99,
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "positive test #2",
+			success: true,
+			req: WrapWithChiCtx(
+				httptest.NewRequest("POST", "/update",
+					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"counter","delta":50}`))),
+				nil),
+			storage: &storage.MetricsStorage{
+				Gauge: make(storage.GaugeMap),
+				Counter: storage.CounterMap{
+					"PollCount": 101,
+				},
+			},
+			want: want[int64]{
+				contentType: "",
+				code:        200,
+				key:         "PollCount",
+				value:       151,
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "negative test #1 (method not allowed)",
+			success: false,
+			req:     WrapWithChiCtx(httptest.NewRequest("GET", "/update", nil), nil),
+			storage: storage.NewMetrics(),
+			want: want[int64]{
+				contentType: "",
+				code:        405,
+				key:         "PollCount",
+				value:       0,
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "negative test #2 (not found)",
+			success: false,
+			req:     WrapWithChiCtx(httptest.NewRequest("POST", "/updat", nil), nil),
+			storage: storage.NewMetrics(),
+			want: want[int64]{
+				contentType: "text/plain; charset=utf-8",
+				code:        404,
+				key:         "PollCount",
+				value:       0,
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "negative test #3 (missing name)",
+			success: false,
+			req: WrapWithChiCtx(
+				httptest.NewRequest("POST", "/update",
+					bytes.NewBuffer([]byte(`{"id":"","type":"counter","delta":50}`))),
+				nil),
+			storage: storage.NewMetrics(),
+			want: want[int64]{
+				contentType: "text/plain; charset=utf-8",
+				code:        404,
+				key:         "",
+				value:       0,
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "negative test #4 (invalid value)",
+			success: false,
+			req: WrapWithChiCtx(
+				httptest.NewRequest("POST", "/update",
+					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"counter","value":"one"}`))),
+				nil),
+			storage: storage.NewMetrics(),
+			want: want[int64]{
+				contentType: "text/plain; charset=utf-8",
+				code:        400,
+				key:         "PollCount",
+				value:       0,
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "negative test #5 (incorrect type)",
+			success: false,
+			req: WrapWithChiCtx(
+				httptest.NewRequest("POST", "/update",
+					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"sometype","value":1}`))),
+				nil),
+			storage: storage.NewMetrics(),
+			want: want[int64]{
+				contentType: "text/plain; charset=utf-8",
+				code:        400,
+				key:         "PollCount",
+				value:       1,
+				errMsg:      "",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := CreateUpdateRootHandler(tt.storage)
+			r := chi.NewRouter()
+			r.Post("/update", h)
 			recorder := httptest.NewRecorder()
 			r.ServeHTTP(recorder, tt.req)
 
