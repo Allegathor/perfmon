@@ -16,7 +16,7 @@ import (
 )
 
 func WrapWithChiCtx(req *http.Request, params map[string]string) *http.Request {
-	if req.RequestURI == "/update" {
+	if req.RequestURI == "/update" || req.RequestURI == "/value" {
 		req.Header.Add("Content-Type", "application/json")
 	}
 
@@ -593,6 +593,161 @@ func TestCreateValueHandler(t *testing.T) {
 
 			if tt.success {
 				assert.Contains(t, string(respBody), tt.want.value)
+			}
+
+		})
+	}
+}
+
+func TestCreateValueRootHandler(t *testing.T) {
+	type want struct {
+		contentType string
+		code        int
+		errMsg      string
+		respBody    string
+	}
+	tests := []struct {
+		name    string
+		success bool
+		req     *http.Request
+		storage *storage.MetricsStorage
+		want    want
+	}{
+		{
+			name:    "positive test #1",
+			success: true,
+			req: WrapWithChiCtx(
+				httptest.NewRequest("POST", "/value",
+					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"counter"}`))),
+				nil),
+			storage: &storage.MetricsStorage{
+				Gauge: make(storage.GaugeMap),
+				Counter: storage.CounterMap{
+					"PollCount": 64,
+				},
+			},
+			want: want{
+				contentType: "application/json",
+				code:        200,
+				respBody:    `{"id":"PollCount","type":"counter","delta":64}`,
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "positive test #2",
+			success: true,
+			req: WrapWithChiCtx(
+				httptest.NewRequest("POST", "/value",
+					bytes.NewBuffer([]byte(`{"id":"Alloc","type":"gauge"}`))),
+				nil),
+			storage: &storage.MetricsStorage{
+				Counter: make(storage.CounterMap),
+				Gauge: storage.GaugeMap{
+					"Alloc": 15994.03143,
+				},
+			},
+			want: want{
+				contentType: "application/json",
+				code:        200,
+				respBody:    `{"id":"Alloc","type":"gauge","value":15994.03143}`,
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "negative test #1 (method not allowed)",
+			success: false,
+			req:     WrapWithChiCtx(httptest.NewRequest("GET", "/value", nil), nil),
+			storage: storage.NewMetrics(),
+			want: want{
+				contentType: "",
+				code:        405,
+				respBody:    "",
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "negative test #2 (not found)",
+			success: false,
+			req:     WrapWithChiCtx(httptest.NewRequest("POST", "/valu", nil), nil),
+			storage: storage.NewMetrics(),
+			want: want{
+				contentType: "text/plain; charset=utf-8",
+				code:        404,
+				respBody:    "",
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "negative test #3 (missing name)",
+			success: false,
+			req: WrapWithChiCtx(
+				httptest.NewRequest("POST", "/value",
+					bytes.NewBuffer([]byte(`{"id":"","type":"counter"}`))),
+				nil),
+			storage: storage.NewMetrics(),
+			want: want{
+				contentType: "text/plain; charset=utf-8",
+				code:        404,
+				respBody:    "",
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "negative test #4 (not found: no such key in storage)",
+			success: false,
+			req: WrapWithChiCtx(
+				httptest.NewRequest("POST", "/value",
+					bytes.NewBuffer([]byte(`{"id":"PollCoutn","type":"counter"}`))),
+				nil),
+			storage: &storage.MetricsStorage{
+				Gauge: make(storage.GaugeMap),
+				Counter: storage.CounterMap{
+					"PollCount": 64,
+				},
+			},
+			want: want{
+				contentType: "text/plain; charset=utf-8",
+				code:        404,
+				respBody:    "",
+				errMsg:      "",
+			},
+		},
+		{
+			name:    "negative test #5 (incorrect type)",
+			success: false,
+			req: WrapWithChiCtx(
+				httptest.NewRequest("POST", "/value",
+					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"sometype"}`))),
+				nil),
+			storage: storage.NewMetrics(),
+			want: want{
+				contentType: "text/plain; charset=utf-8",
+				code:        400,
+				respBody:    "",
+				errMsg:      "",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := CreateValueRootHandler(tt.storage)
+			r := chi.NewRouter()
+			r.Post("/value", h)
+			recorder := httptest.NewRecorder()
+			r.ServeHTTP(recorder, tt.req)
+
+			res := recorder.Result()
+			assert.Equal(t, tt.want.code, res.StatusCode)
+			assert.Equal(t, tt.want.contentType, res.Header.Get("Content-Type"))
+
+			respBody, err := io.ReadAll(res.Body)
+			require.NoError(t, err)
+
+			err = res.Body.Close()
+			require.NoError(t, err)
+
+			if tt.success {
+				assert.Equal(t, tt.want.respBody, string(respBody))
 			}
 
 		})

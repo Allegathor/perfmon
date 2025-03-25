@@ -34,6 +34,7 @@ func (mon *MonServ) MountHandlers() {
 		})
 	})
 	mon.Router.Route("/value", func(r chi.Router) {
+		r.Post("/", handlers.CreateValueRootHandler(ms))
 		r.Route("/{type}/{name}", func(r chi.Router) {
 			r.Get("/", handlers.CreateValueHandler(ms))
 		})
