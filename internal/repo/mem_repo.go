@@ -59,7 +59,7 @@ func (tx *MRepoTx[T]) lock() {
 	if tx.writable {
 		tx.repo.mu.Lock()
 	} else {
-		tx.repo.mu.RLock()
+		// tx.repo.mu.RLock()
 	}
 }
 
@@ -67,7 +67,7 @@ func (tx *MRepoTx[T]) unlock() {
 	if tx.writable {
 		tx.repo.mu.Unlock()
 	} else {
-		tx.repo.mu.RUnlock()
+		// tx.repo.mu.RUnlock()
 	}
 }
 
