@@ -17,7 +17,7 @@ type VTypes interface {
 
 type MRepo[T VTypes] struct {
 	mu   sync.RWMutex
-	data map[string]T
+	Data map[string]T
 }
 
 type Tx[T VTypes] interface {
@@ -35,24 +35,24 @@ type MRepoTx[T VTypes] struct {
 }
 
 func (tx *MRepoTx[T]) Get(name string) (T, bool) {
-	v, ok := tx.repo.data[name]
+	v, ok := tx.repo.Data[name]
 	return v, ok
 }
 
 func (tx *MRepoTx[T]) GetAll() map[string]T {
-	return tx.repo.data
+	return tx.repo.Data
 }
 
 func (tx *MRepoTx[T]) Set(name string, v T) {
-	tx.repo.data[name] = v
+	tx.repo.Data[name] = v
 }
 
 func (tx *MRepoTx[T]) SetAccum(name string, v T) {
-	if _, ok := tx.repo.data[name]; ok {
-		tx.repo.data[name] += v
+	if _, ok := tx.repo.Data[name]; ok {
+		tx.repo.Data[name] += v
 		return
 	}
-	tx.repo.data[name] = v
+	tx.repo.Data[name] = v
 }
 
 func (tx *MRepoTx[T]) lock() {
@@ -73,7 +73,7 @@ func (tx *MRepoTx[T]) unlock() {
 
 func NewMRepo[T VTypes]() *MRepo[T] {
 	return &MRepo[T]{
-		data: make(map[string]T),
+		Data: make(map[string]T),
 	}
 }
 

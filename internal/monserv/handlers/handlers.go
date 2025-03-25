@@ -207,15 +207,20 @@ func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *Resp
 
 	if m.MType == mondata.GaugeType {
 		var (
-			v  float64
-			ok bool
+			v      float64
+			ok     bool
+			ch     = make(chan float64)
+			chbool = make(chan bool)
 		)
 
 		go gr.Read(func(tx repo.Tx[float64]) error {
-			v, ok = tx.Get(m.ID)
+			value, found := tx.Get(m.ID)
+			ch <- value
+			chbool <- found
 			return nil
 		})
 
+		v, ok = <-ch, <-chbool
 		if ok {
 			return &vhData{
 				code: http.StatusOK,
@@ -227,15 +232,20 @@ func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *Resp
 		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in storage", nil)
 	} else if m.MType == mondata.CounterType {
 		var (
-			v  int64
-			ok bool
+			v      int64
+			ok     bool
+			ch     = make(chan int64)
+			chbool = make(chan bool)
 		)
 
 		go cr.Read(func(tx repo.Tx[int64]) error {
-			v, ok = tx.Get(m.ID)
+			value, found := tx.Get(m.ID)
+			ch <- value
+			chbool <- found
 			return nil
 		})
 
+		v, ok = <-ch, <-chbool
 		if ok {
 			return &vhData{
 				code: http.StatusOK,
