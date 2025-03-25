@@ -29,14 +29,14 @@ func (mon *MonServ) MountHandlers() {
 	mon.Router.Get("/", handlers.CreateRootHandler(ms, ""))
 	mon.Router.Route("/update", func(r chi.Router) {
 		r.Post("/", handlers.CreateUpdateRootHandler(ms))
-		r.Route("/{type}/{name}/{value}", func(r chi.Router) {
-			r.Post("/", handlers.CreateUpdateHandler(ms))
-		})
+		// r.Route("/{type}/{name}/{value}", func(r chi.Router) {
+		// 	r.Post("/", handlers.CreateUpdateHandler(ms))
+		// })
 	})
 	mon.Router.Route("/value", func(r chi.Router) {
 		r.Post("/", handlers.CreateValueRootHandler(ms))
-		r.Route("/{type}/{name}", func(r chi.Router) {
-			r.Get("/", handlers.CreateValueHandler(ms))
-		})
+		// r.Route("/{type}/{name}", func(r chi.Router) {
+		// 	r.Get("/", handlers.CreateValueHandler(ms))
+		// })
 	})
 }
