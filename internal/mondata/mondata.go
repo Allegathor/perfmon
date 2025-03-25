@@ -18,13 +18,18 @@ const (
 	CounterType = "counter"
 )
 
+type (
+	GaugeVType   = float64
+	CounterVType = int64
+)
+
 type Gauge struct {
 	MetricType string
 	Name       string
 	Value      float64
 }
 
-type GaugeValue interface {
+type gaugeValFrom interface {
 	int | int32 | int64 | uint | uint32 | uint64 | float32 | float64
 }
 
@@ -36,7 +41,7 @@ func FormatGauge(f float64) string {
 	return strings.TrimRight(strconv.FormatFloat(f, 'f', -1, 64), "0.")
 }
 
-func NewGauge[V GaugeValue](name string, f V) *Gauge {
+func NewGauge[V gaugeValFrom](name string, f V) *Gauge {
 	return &Gauge{
 		MetricType: GaugeType,
 		Name:       name,

@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
+	"github.com/Allegathor/perfmon/internal/repo"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -43,29 +44,48 @@ func (re *RespError) Msg() string {
 	return re.msg
 }
 
-type MetricsStorage interface {
-	SetGauge(string, float64)
-	GetGauge(string) (float64, bool)
-	GetGaugeAll() map[string]float64
-
-	SetCounter(string, int64)
-	GetCounter(string) (int64, bool)
-	GetCounterAll() map[string]int64
+type GaugeRepo interface {
+	Read(func(repo.Tx[float64]) error) error
+	Update(func(repo.Tx[float64]) error) error
 }
 
-func CreateRootHandler(s MetricsStorage, path string) http.HandlerFunc {
+type CounterRepo interface {
+	Read(func(repo.Tx[int64]) error) error
+	Update(func(repo.Tx[int64]) error) error
+}
+
+func CreateRootHandler(gr GaugeRepo, cr CounterRepo, path string) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
-		type Value interface {
+		type Vals interface {
 			map[string]float64 | map[string]int64
 		}
-		type Table[T Value] struct {
+
+		type Table[T Vals] struct {
 			Name    string
 			Content T
 		}
 
+		gch := make(chan map[string]float64)
+		cch := make(chan map[string]int64)
+
+		go gr.Read(func(tx repo.Tx[float64]) error {
+			gch <- tx.GetAll()
+			return nil
+		})
+
+		go cr.Read(func(tx repo.Tx[int64]) error {
+			cch <- tx.GetAll()
+			tx.GetAll()
+
+			return nil
+		})
+
+		gVals := <-gch
+		cVals := <-cch
+
 		viewData := []any{
-			Table[map[string]int64]{Name: "Counter", Content: s.GetCounterAll()},
-			Table[map[string]float64]{Name: "Gauge", Content: s.GetGaugeAll()},
+			Table[map[string]float64]{Name: "Gauge", Content: gVals},
+			Table[map[string]int64]{Name: "Counter", Content: cVals},
 		}
 
 		if path == "" {
@@ -86,7 +106,7 @@ func CreateRootHandler(s MetricsStorage, path string) http.HandlerFunc {
 	}
 }
 
-func updateMetrics(m *mondata.Metrics, s MetricsStorage) (int, *RespError) {
+func updateMetrics(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (int, *RespError) {
 	if m.ID == "" {
 		return http.StatusNotFound, NewRespError("name must contain a value", nil)
 	}
@@ -100,7 +120,11 @@ func updateMetrics(m *mondata.Metrics, s MetricsStorage) (int, *RespError) {
 			m.Value = &v
 		}
 
-		s.SetGauge(m.ID, *m.Value)
+		go gr.Update(func(tx repo.Tx[float64]) error {
+			tx.Set(m.ID, *m.Value)
+			return nil
+		})
+
 		return http.StatusOK, nil
 
 	} else if m.MType == mondata.CounterType {
@@ -112,7 +136,10 @@ func updateMetrics(m *mondata.Metrics, s MetricsStorage) (int, *RespError) {
 			m.Delta = &d
 		}
 
-		s.SetCounter(m.ID, *m.Delta)
+		go cr.Update(func(tx repo.Tx[int64]) error {
+			tx.SetAccum(m.ID, *m.Delta)
+			return nil
+		})
 		return http.StatusOK, nil
 
 	}
@@ -120,14 +147,14 @@ func updateMetrics(m *mondata.Metrics, s MetricsStorage) (int, *RespError) {
 	return http.StatusBadRequest, NewRespError("incorrect request type", nil)
 }
 
-func CreateUpdateHandler(s MetricsStorage) http.HandlerFunc {
+func CreateUpdateHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		var m = &mondata.Metrics{}
 
 		m.MType = chi.URLParam(req, URLPathType)
 		m.ID = chi.URLParam(req, URLPathName)
 		m.SValue = chi.URLParam(req, URLPathValue)
-		code, err := updateMetrics(m, s)
+		code, err := updateMetrics(m, gr, cr)
 		if err != nil {
 			http.Error(rw, err.Msg(), code)
 			return
@@ -137,7 +164,7 @@ func CreateUpdateHandler(s MetricsStorage) http.HandlerFunc {
 	}
 }
 
-func CreateUpdateRootHandler(s MetricsStorage) http.HandlerFunc {
+func CreateUpdateRootHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Content-Type") == "application/json" {
 			var buf bytes.Buffer
@@ -154,7 +181,7 @@ func CreateUpdateRootHandler(s MetricsStorage) http.HandlerFunc {
 				return
 			}
 
-			code, respErr := updateMetrics(m, s)
+			code, respErr := updateMetrics(m, gr, cr)
 			if respErr != nil {
 				http.Error(rw, respErr.Msg(), code)
 				return
@@ -173,13 +200,23 @@ type vhData struct {
 	code    int
 }
 
-func getVhData(m *mondata.Metrics, s MetricsStorage) (*vhData, *RespError) {
+func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *RespError) {
 	if m.ID == "" {
 		return &vhData{code: http.StatusNotFound}, NewRespError("name must contain a value", nil)
 	}
 
 	if m.MType == mondata.GaugeType {
-		if v, ok := s.GetGauge(m.ID); ok {
+		var (
+			v  float64
+			ok bool
+		)
+
+		go gr.Read(func(tx repo.Tx[float64]) error {
+			v, ok = tx.Get(m.ID)
+			return nil
+		})
+
+		if ok {
 			return &vhData{
 				code: http.StatusOK,
 				metrics: &mondata.Metrics{
@@ -189,7 +226,17 @@ func getVhData(m *mondata.Metrics, s MetricsStorage) (*vhData, *RespError) {
 		}
 		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in storage", nil)
 	} else if m.MType == mondata.CounterType {
-		if v, ok := s.GetCounter(m.ID); ok {
+		var (
+			v  int64
+			ok bool
+		)
+
+		go cr.Read(func(tx repo.Tx[int64]) error {
+			v, ok = tx.Get(m.ID)
+			return nil
+		})
+
+		if ok {
 			return &vhData{
 				code: http.StatusOK,
 				metrics: &mondata.Metrics{
@@ -203,12 +250,12 @@ func getVhData(m *mondata.Metrics, s MetricsStorage) (*vhData, *RespError) {
 	return &vhData{code: http.StatusBadRequest}, NewRespError("incorrect request type", nil)
 }
 
-func CreateValueHandler(s MetricsStorage) http.HandlerFunc {
+func CreateValueHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		m := &mondata.Metrics{}
 		m.MType = chi.URLParam(req, URLPathType)
 		m.ID = chi.URLParam(req, URLPathName)
-		vhd, respErr := getVhData(m, s)
+		vhd, respErr := getVhData(m, gr, cr)
 		if respErr != nil {
 			http.Error(rw, respErr.Msg(), vhd.code)
 			return
@@ -222,7 +269,7 @@ func CreateValueHandler(s MetricsStorage) http.HandlerFunc {
 	}
 }
 
-func CreateValueRootHandler(s MetricsStorage) http.HandlerFunc {
+func CreateValueRootHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Content-Type") == "application/json" {
 			var buf bytes.Buffer
@@ -238,7 +285,7 @@ func CreateValueRootHandler(s MetricsStorage) http.HandlerFunc {
 				return
 			}
 
-			vhd, respErr := getVhData(m, s)
+			vhd, respErr := getVhData(m, gr, cr)
 			if respErr != nil {
 				http.Error(rw, respErr.Msg(), vhd.code)
 				return
