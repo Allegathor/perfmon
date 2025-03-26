@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"os"
@@ -229,6 +230,7 @@ func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *Resp
 				},
 			}, nil
 		}
+		fmt.Printf("value[%s] with type %s doesn't exist in a storage", m.MType, m.ID)
 		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in storage", nil)
 	} else if m.MType == mondata.CounterType {
 		var (
@@ -254,6 +256,7 @@ func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *Resp
 				},
 			}, nil
 		}
+		fmt.Printf("value[%s] with type %s doesn't exist in a storage", m.MType, m.ID)
 		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in storage", nil)
 	}
 
