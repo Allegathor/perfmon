@@ -5,9 +5,22 @@ import (
 	"strings"
 )
 
+type Metrics struct {
+	ID     string   `json:"id"`
+	MType  string   `json:"type"`
+	Delta  *int64   `json:"delta,omitempty"`
+	Value  *float64 `json:"value,omitempty"`
+	SValue string   `json:"-"`
+}
+
 const (
 	GaugeType   = "gauge"
 	CounterType = "counter"
+)
+
+type (
+	GaugeVType   = float64
+	CounterVType = int64
 )
 
 type Gauge struct {
@@ -16,7 +29,7 @@ type Gauge struct {
 	Value      float64
 }
 
-type GaugeValue interface {
+type gaugeValFrom interface {
 	int | int32 | int64 | uint | uint32 | uint64 | float32 | float64
 }
 
@@ -28,7 +41,7 @@ func FormatGauge(f float64) string {
 	return strings.TrimRight(strconv.FormatFloat(f, 'f', -1, 64), "0.")
 }
 
-func NewGauge[V GaugeValue](name string, f V) *Gauge {
+func NewGauge[V gaugeValFrom](name string, f V) *Gauge {
 	return &Gauge{
 		MetricType: GaugeType,
 		Name:       name,
