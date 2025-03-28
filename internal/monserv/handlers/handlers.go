@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
 	"github.com/Allegathor/perfmon/internal/repo"
@@ -168,7 +169,7 @@ func CreateUpdateHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 
 func CreateUpdateRootHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Content-Type") == "application/json; charset=utf-8" {
+		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
 			var buf bytes.Buffer
 
 			_, err := buf.ReadFrom(req.Body)
@@ -285,7 +286,7 @@ func CreateValueHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 
 func CreateValueRootHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Content-Type") == "application/json; charset=utf-8" {
+		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
 			var buf bytes.Buffer
 			_, err := buf.ReadFrom(req.Body)
 			if err != nil {

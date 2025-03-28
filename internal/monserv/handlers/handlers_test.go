@@ -679,7 +679,7 @@ func TestCreateValueRootHandler(t *testing.T) {
 				},
 			},
 			want: want{
-				contentType: "application/json",
+				contentType: "application/json; charset=utf-8",
 				code:        200,
 				respBody:    `{"id":"PollCount","type":"counter","delta":64}`,
 				errMsg:      "",
@@ -700,7 +700,7 @@ func TestCreateValueRootHandler(t *testing.T) {
 				},
 			},
 			want: want{
-				contentType: "application/json",
+				contentType: "application/json; charset=utf-8",
 				code:        200,
 				respBody:    `{"id":"Alloc","type":"gauge","value":15994.03143}`,
 				errMsg:      "",
