@@ -100,6 +100,7 @@ func CreateRootHandler(gr GaugeRepo, cr CounterRepo, path string) http.HandlerFu
 			return
 		}
 
+		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 		err = t.Execute(rw, viewData)
 		if err != nil {
 			http.Error(rw, "template execution error", http.StatusInternalServerError)
@@ -167,7 +168,7 @@ func CreateUpdateHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 
 func CreateUpdateRootHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Content-Type") == "application/json" {
+		if req.Header.Get("Content-Type") == "application/json; charset=utf-8" {
 			var buf bytes.Buffer
 
 			_, err := buf.ReadFrom(req.Body)
@@ -230,8 +231,8 @@ func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *Resp
 				},
 			}, nil
 		}
-		fmt.Printf("value[%s] with type %s doesn't exist in a storage", m.MType, m.ID)
-		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in storage", nil)
+		fmt.Printf("value[%s] with type %s doesn't exist in the storage\n", m.MType, m.ID)
+		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in the storage", nil)
 	} else if m.MType == mondata.CounterType {
 		var (
 			v      int64
@@ -256,8 +257,8 @@ func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *Resp
 				},
 			}, nil
 		}
-		fmt.Printf("value[%s] with type %s doesn't exist in a storage", m.MType, m.ID)
-		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in storage", nil)
+		fmt.Printf("value[%s] with type %s doesn't exist in the storage\n", m.MType, m.ID)
+		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in the storage", nil)
 	}
 
 	return &vhData{code: http.StatusBadRequest}, NewRespError("incorrect request type", nil)
@@ -284,7 +285,7 @@ func CreateValueHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 
 func CreateValueRootHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Content-Type") == "application/json" {
+		if req.Header.Get("Content-Type") == "application/json; charset=utf-8" {
 			var buf bytes.Buffer
 			_, err := buf.ReadFrom(req.Body)
 			if err != nil {
@@ -310,7 +311,7 @@ func CreateValueRootHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 				return
 			}
 
-			rw.Header().Add("Content-Type", "application/json")
+			rw.Header().Add("Content-Type", "application/json; charset=utf-8")
 			_, err = rw.Write(b)
 			if err != nil {
 				http.Error(rw, "rw error", http.StatusInternalServerError)

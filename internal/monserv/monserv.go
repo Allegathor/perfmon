@@ -23,7 +23,7 @@ func NewInstance(addr string, l *zap.SugaredLogger) *MonServ {
 }
 
 func (mon *MonServ) MountHandlers() {
-	mon.Router.Use(middlewares.CreateLogger(mon.Logger))
+	mon.Router.Use(middlewares.CreateLogger(mon.Logger), middlewares.Compress)
 
 	gr := repo.NewMRepo[float64]()
 	cr := repo.NewMRepo[int64]()

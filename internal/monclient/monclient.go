@@ -2,6 +2,7 @@ package monclient
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -27,7 +28,7 @@ func NewInstance(addr string, interval uint) *MonClient {
 	return m
 }
 
-func buildBuf(name string, mtype string, g *float64, c *int64) *bytes.Buffer {
+func buildReqBody(name string, mtype string, g *float64, c *int64) []byte {
 	data := &mondata.Metrics{
 		ID:    name,
 		MType: mtype,
@@ -41,15 +42,26 @@ func buildBuf(name string, mtype string, g *float64, c *int64) *bytes.Buffer {
 	if err != nil {
 		panic(err)
 	}
-	return bytes.NewBuffer(j)
+	return j
 }
 
-func (m *MonClient) Post(buf *bytes.Buffer) {
-	req, err := http.NewRequest(http.MethodPost, m.addr+m.updatePath, buf)
+func (m *MonClient) Post(p []byte) {
+	var buf bytes.Buffer
+	zb := gzip.NewWriter(&buf)
+	_, err := zb.Write(p)
 	if err != nil {
 		panic(err)
 	}
-	req.Header.Add("Content-Type", "application/json")
+	zb.Close()
+
+	req, err := http.NewRequest(http.MethodPost, m.addr+m.updatePath, &buf)
+	if err != nil {
+		panic(err)
+	}
+
+	req.Header.Add("Accept-Encoding", "gzip")
+	req.Header.Add("Content-Encoding", "gzip")
+	req.Header.Add("Content-Type", "application/json; charset=utf-8")
 
 	resp, err := m.Do(req)
 	if err != nil {
@@ -65,14 +77,14 @@ func (m *MonClient) PollStats(gm map[string]float64, cm map[string]int64) {
 		time.Sleep(time.Duration(m.pollInterval) * time.Second)
 		go func() {
 			for k, v := range gm {
-				b := buildBuf(k, mondata.GaugeType, &v, nil)
+				b := buildReqBody(k, mondata.GaugeType, &v, nil)
 				m.Post(b)
 			}
 		}()
 
 		go func() {
 			for k, v := range cm {
-				b := buildBuf(k, mondata.CounterType, nil, &v)
+				b := buildReqBody(k, mondata.CounterType, nil, &v)
 				m.Post(b)
 			}
 
