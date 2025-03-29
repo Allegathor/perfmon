@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
-	"github.com/Allegathor/perfmon/internal/repo"
+	"github.com/Allegathor/perfmon/internal/repo/transaction"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -46,17 +46,7 @@ func (re *RespError) Msg() string {
 	return re.msg
 }
 
-type GaugeRepo interface {
-	Read(func(repo.Tx[float64]) error) error
-	Update(func(repo.Tx[float64]) error) error
-}
-
-type CounterRepo interface {
-	Read(func(repo.Tx[int64]) error) error
-	Update(func(repo.Tx[int64]) error) error
-}
-
-func CreateRootHandler(gr GaugeRepo, cr CounterRepo, path string) http.HandlerFunc {
+func CreateRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo, path string) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		type Vals interface {
 			map[string]float64 | map[string]int64
@@ -70,12 +60,12 @@ func CreateRootHandler(gr GaugeRepo, cr CounterRepo, path string) http.HandlerFu
 		gch := make(chan map[string]float64)
 		cch := make(chan map[string]int64)
 
-		go gr.Read(func(tx repo.Tx[float64]) error {
+		go gr.Read(func(tx transaction.Tx[float64]) error {
 			gch <- tx.GetAll()
 			return nil
 		})
 
-		go cr.Read(func(tx repo.Tx[int64]) error {
+		go cr.Read(func(tx transaction.Tx[int64]) error {
 			cch <- tx.GetAll()
 			tx.GetAll()
 
@@ -109,7 +99,7 @@ func CreateRootHandler(gr GaugeRepo, cr CounterRepo, path string) http.HandlerFu
 	}
 }
 
-func updateMetrics(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (int, *RespError) {
+func updateMetrics(m *mondata.Metrics, gr transaction.GaugeRepo, cr transaction.CounterRepo) (int, *RespError) {
 	if m.ID == "" {
 		return http.StatusNotFound, NewRespError("name must contain a value", nil)
 	}
@@ -123,7 +113,7 @@ func updateMetrics(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (int, *Resp
 			m.Value = &v
 		}
 
-		go gr.Update(func(tx repo.Tx[float64]) error {
+		go gr.Update(func(tx transaction.Tx[float64]) error {
 			tx.Set(m.ID, *m.Value)
 			return nil
 		})
@@ -139,7 +129,7 @@ func updateMetrics(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (int, *Resp
 			m.Delta = &d
 		}
 
-		go cr.Update(func(tx repo.Tx[int64]) error {
+		go cr.Update(func(tx transaction.Tx[int64]) error {
 			tx.SetAccum(m.ID, *m.Delta)
 			return nil
 		})
@@ -150,7 +140,7 @@ func updateMetrics(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (int, *Resp
 	return http.StatusBadRequest, NewRespError("incorrect request type", nil)
 }
 
-func CreateUpdateHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
+func CreateUpdateHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		var m = &mondata.Metrics{}
 
@@ -167,7 +157,7 @@ func CreateUpdateHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 	}
 }
 
-func CreateUpdateRootHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
+func CreateUpdateRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
 			var buf bytes.Buffer
@@ -203,7 +193,7 @@ type vhData struct {
 	code    int
 }
 
-func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *RespError) {
+func getVhData(m *mondata.Metrics, gr transaction.GaugeRepo, cr transaction.CounterRepo) (*vhData, *RespError) {
 	if m.ID == "" {
 		return &vhData{code: http.StatusNotFound}, NewRespError("name must contain a value", nil)
 	}
@@ -216,7 +206,7 @@ func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *Resp
 			chbool = make(chan bool)
 		)
 
-		go gr.Read(func(tx repo.Tx[float64]) error {
+		go gr.Read(func(tx transaction.Tx[float64]) error {
 			value, found := tx.Get(m.ID)
 			ch <- value
 			chbool <- found
@@ -242,7 +232,7 @@ func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *Resp
 			chbool = make(chan bool)
 		)
 
-		go cr.Read(func(tx repo.Tx[int64]) error {
+		go cr.Read(func(tx transaction.Tx[int64]) error {
 			value, found := tx.Get(m.ID)
 			ch <- value
 			chbool <- found
@@ -265,7 +255,7 @@ func getVhData(m *mondata.Metrics, gr GaugeRepo, cr CounterRepo) (*vhData, *Resp
 	return &vhData{code: http.StatusBadRequest}, NewRespError("incorrect request type", nil)
 }
 
-func CreateValueHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
+func CreateValueHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		m := &mondata.Metrics{}
 		m.MType = chi.URLParam(req, URLPathType)
@@ -284,7 +274,7 @@ func CreateValueHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 	}
 }
 
-func CreateValueRootHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
+func CreateValueRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
 			var buf bytes.Buffer

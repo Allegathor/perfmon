@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
+	"github.com/Allegathor/perfmon/internal/repo/transaction"
 )
 
 type (
@@ -11,25 +12,12 @@ type (
 	CounterMap = map[string]mondata.CounterVType
 )
 
-type VTypes interface {
-	mondata.GaugeVType | mondata.CounterVType
-}
-
-type MRepo[T VTypes] struct {
+type MRepo[T mondata.VTypes] struct {
 	mu   sync.RWMutex
 	Data map[string]T
 }
 
-type Tx[T VTypes] interface {
-	Get(name string) (T, bool)
-	GetAll() map[string]T
-	Set(name string, v T)
-	SetAccum(name string, v T)
-	lock()
-	unlock()
-}
-
-type MRepoTx[T VTypes] struct {
+type MRepoTx[T mondata.VTypes] struct {
 	repo     *MRepo[T]
 	writable bool
 }
@@ -55,7 +43,11 @@ func (tx *MRepoTx[T]) SetAccum(name string, v T) {
 	tx.repo.Data[name] = v
 }
 
-func (tx *MRepoTx[T]) lock() {
+func (tx *MRepoTx[T]) SetAll(data map[string]T) {
+	tx.repo.Data = data
+}
+
+func (tx *MRepoTx[T]) Lock() {
 	if tx.writable {
 		tx.repo.mu.Lock()
 	} else {
@@ -63,7 +55,7 @@ func (tx *MRepoTx[T]) lock() {
 	}
 }
 
-func (tx *MRepoTx[T]) unlock() {
+func (tx *MRepoTx[T]) Unlock() {
 	if tx.writable {
 		tx.repo.mu.Unlock()
 	} else {
@@ -71,40 +63,40 @@ func (tx *MRepoTx[T]) unlock() {
 	}
 }
 
-func NewMRepo[T VTypes]() *MRepo[T] {
+func NewMRepo[T mondata.VTypes]() *MRepo[T] {
 	return &MRepo[T]{
 		Data: make(map[string]T),
 	}
 }
 
-func (r *MRepo[T]) Begin(writable bool) (Tx[T], error) {
+func (r *MRepo[T]) Begin(writable bool) (transaction.Tx[T], error) {
 	tx := &MRepoTx[T]{
 		repo:     r,
 		writable: writable,
 	}
-	tx.lock()
+	tx.Lock()
 
 	return tx, nil
 }
 
-func (r *MRepo[T]) managed(writable bool, fn func(Tx[T]) error) (err error) {
+func (r *MRepo[T]) managed(writable bool, fn func(transaction.Tx[T]) error) (err error) {
 	tx, err := r.Begin(writable)
 	if err != nil {
 		return err
 	}
 
 	defer func() {
-		tx.unlock()
+		tx.Unlock()
 	}()
 
 	err = fn(tx)
 	return nil
 }
 
-func (r *MRepo[T]) Read(fn func(Tx[T]) error) error {
+func (r *MRepo[T]) Read(fn func(transaction.Tx[T]) error) error {
 	return r.managed(false, fn)
 }
 
-func (r *MRepo[T]) Update(fn func(Tx[T]) error) error {
+func (r *MRepo[T]) Update(fn func(transaction.Tx[T]) error) error {
 	return r.managed(true, fn)
 }

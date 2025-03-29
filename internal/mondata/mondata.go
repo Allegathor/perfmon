@@ -23,6 +23,10 @@ type (
 	CounterVType = int64
 )
 
+type VTypes interface {
+	GaugeVType | CounterVType
+}
+
 type Gauge struct {
 	MetricType string
 	Name       string
