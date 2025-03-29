@@ -2,36 +2,44 @@ package monserv
 
 import (
 	"github.com/Allegathor/perfmon/internal/monserv/handlers"
-	"github.com/Allegathor/perfmon/internal/storage"
+	"github.com/Allegathor/perfmon/internal/monserv/middlewares"
+	"github.com/Allegathor/perfmon/internal/repo/transaction"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"go.uber.org/zap"
 )
 
 type MonServ struct {
-	Router *chi.Mux
+	Router        *chi.Mux
+	Logger        *zap.SugaredLogger
+	txGaugeRepo   transaction.GaugeRepo
+	txCounterRepo transaction.CounterRepo
 }
 
-func NewInstance(addr string) *MonServ {
+func NewInstance(addr string, l *zap.SugaredLogger, gr transaction.GaugeRepo, cr transaction.CounterRepo) *MonServ {
 	mon := &MonServ{
-		Router: chi.NewRouter(),
+		Router:        chi.NewRouter(),
+		Logger:        l,
+		txGaugeRepo:   gr,
+		txCounterRepo: cr,
 	}
 
 	return mon
 }
 
 func (mon *MonServ) MountHandlers() {
-	mon.Router.Use(middleware.Logger)
+	mon.Router.Use(middlewares.CreateLogger(mon.Logger), middlewares.Compress)
 
-	ms := storage.NewMetrics()
-	mon.Router.Get("/", handlers.CreateRootHandler(ms, ""))
+	mon.Router.Get("/", handlers.CreateRootHandler(mon.txGaugeRepo, mon.txCounterRepo, ""))
 	mon.Router.Route("/update", func(r chi.Router) {
+		r.Post("/", handlers.CreateUpdateRootHandler(mon.txGaugeRepo, mon.txCounterRepo))
 		r.Route("/{type}/{name}/{value}", func(r chi.Router) {
-			r.Post("/", handlers.CreateUpdateHandler(ms))
+			r.Post("/", handlers.CreateUpdateHandler(mon.txGaugeRepo, mon.txCounterRepo))
 		})
 	})
 	mon.Router.Route("/value", func(r chi.Router) {
+		r.Post("/", handlers.CreateValueRootHandler(mon.txGaugeRepo, mon.txCounterRepo))
 		r.Route("/{type}/{name}", func(r chi.Router) {
-			r.Get("/", handlers.CreateValueHandler(ms))
+			r.Get("/", handlers.CreateValueHandler(mon.txGaugeRepo, mon.txCounterRepo))
 		})
 	})
 }
