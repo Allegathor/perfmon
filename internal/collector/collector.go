@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"math/rand/v2"
 	"runtime"
 	"time"
 )
@@ -73,10 +74,10 @@ func (c *Collector) GaugeStats() {
 	c.SetGauge("PauseTotalNs", float64(m.PauseTotalNs))
 
 	c.SetGauge("OtherSys", float64(m.OtherSys))
+	c.SetGauge("RandomValue", (rand.Float64()*100)+1)
 }
 
 func (c *Collector) UpdateCounters() {
-	c.SetCounter("RandomValue", 1)
 	c.SetCounter("PollCount", 1)
 }
 
@@ -89,7 +90,7 @@ func (c *Collector) Stats() Mtcs {
 
 func (c *Collector) Monitor(ch chan Mtcs) {
 	for {
-		time.Sleep(2 * time.Second)
+		time.Sleep(time.Duration(c.pollInterval) * time.Second)
 		go func() {
 			stats := c.Stats()
 			ch <- stats

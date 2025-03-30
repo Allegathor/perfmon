@@ -4,25 +4,31 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	"net/http"
 	"time"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
+	"github.com/go-resty/resty/v2"
 )
 
 type MonClient struct {
 	addr         string
 	updatePath   string
 	pollInterval uint
-	*http.Client
+	Client       *resty.Client
 }
 
 func NewInstance(addr string, interval uint) *MonClient {
+	c := resty.New()
+	c.
+		SetRetryCount(3).
+		SetRetryWaitTime(30 * time.Second).
+		SetRetryMaxWaitTime(90 * time.Second)
+
 	m := &MonClient{
 		addr:         addr,
 		updatePath:   "/update",
 		pollInterval: interval,
-		Client:       &http.Client{},
+		Client:       c,
 	}
 
 	return m
@@ -54,21 +60,18 @@ func (m *MonClient) Post(p []byte) {
 	}
 	zb.Close()
 
-	req, err := http.NewRequest(http.MethodPost, m.addr+m.updatePath, &buf)
+	resp, err := m.Client.R().
+		SetHeader("Accept-Encoding", "gzip").
+		SetHeader("Content-Encoding", "gzip").
+		SetHeader("Content-Type", "application/json; charset=utf-8").
+		SetBody(&buf).
+		Post(m.addr + m.updatePath)
+
 	if err != nil {
 		panic(err)
 	}
 
-	req.Header.Add("Accept-Encoding", "gzip")
-	req.Header.Add("Content-Encoding", "gzip")
-	req.Header.Add("Content-Type", "application/json; charset=utf-8")
-
-	resp, err := m.Do(req)
-	if err != nil {
-		panic(err)
-	}
-
-	resp.Body.Close()
+	resp.RawBody().Close()
 }
 
 func (m *MonClient) PollStats(gm map[string]float64, cm map[string]int64) {
