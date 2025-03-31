@@ -77,9 +77,37 @@ func main() {
 	flag.Parse()
 	client := monclient.NewInstance(opts.addr, opts.reportInterval)
 	col := collector.New(opts.pollInterval)
-	ch := make(chan collector.Mtcs)
+	ch := make(chan collector.Repo)
+	gch := make(chan map[string]float64)
+	cch := make(chan map[string]int64)
+
 	go col.Monitor(ch)
 	for mtcs := range ch {
-		client.PollStats(mtcs.Gauge, mtcs.Counter)
+		var (
+			gauge   map[string]float64
+			counter map[string]int64
+		)
+
+		go func() {
+			mtcs.Gauge.Read(func(tx *collector.MtcsTx[float64]) error {
+				gv := tx.GetAll()
+				gch <- gv
+
+				return nil
+			})
+		}()
+
+		go func() {
+			mtcs.Counter.Read(func(tx *collector.MtcsTx[int64]) error {
+				cv := tx.GetAll()
+				cch <- cv
+
+				return nil
+			})
+		}()
+
+		gauge, counter = <-gch, <-cch
+
+		client.PollStats(gauge, counter)
 	}
 }
