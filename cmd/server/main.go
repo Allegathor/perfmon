@@ -25,7 +25,7 @@ type flags struct {
 
 var opts flags
 
-var defOpts = flags{
+var defOpts = &flags{
 	addr:          "localhost:8080",
 	mode:          "dev",
 	path:          "./backup.json",
@@ -48,8 +48,10 @@ func init() {
 	if envIntrv != "" {
 		i, err := strconv.ParseInt(envIntrv, 10, 32)
 		if err != nil {
-			opts.storeInterval = uint(i)
+			fmt.Println(err.Error())
+			flag.UintVar(&opts.storeInterval, "i", defOpts.storeInterval, "interval (in seconds) of writing to backup file")
 		}
+		opts.storeInterval = uint(i)
 	} else {
 		flag.UintVar(&opts.storeInterval, "i", defOpts.storeInterval, "interval (in seconds) of writing to backup file")
 	}
@@ -59,8 +61,9 @@ func init() {
 		rb, err := strconv.ParseBool(r)
 		if err != nil {
 			fmt.Println(err.Error())
+			flag.BoolVar(&opts.restore, "r", defOpts.restore, "set to restore values of repo from file at start")
 		}
-		defOpts.restore = rb
+		opts.restore = rb
 	} else {
 		flag.BoolVar(&opts.restore, "r", defOpts.restore, "set to restore values of repo from file at start")
 	}

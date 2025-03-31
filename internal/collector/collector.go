@@ -86,7 +86,7 @@ type Repo struct {
 }
 
 type Collector struct {
-	repo         *Repo
+	Repo         *Repo
 	pollInterval uint
 }
 
@@ -100,7 +100,7 @@ func New(pollInterval uint) *Collector {
 	}
 
 	return &Collector{
-		repo: &Repo{
+		Repo: &Repo{
 			Gauge:   g,
 			Counter: c,
 		},
@@ -112,7 +112,7 @@ func (c *Collector) GaugeStats() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	go c.repo.Gauge.Update(func(tx *MtcsTx[float64]) error {
+	c.Repo.Gauge.Update(func(tx *MtcsTx[float64]) error {
 		// total
 		tx.Set("TotalAlloc", float64(m.TotalAlloc))
 		tx.Set("Sys", float64(m.Sys))
@@ -155,8 +155,7 @@ func (c *Collector) GaugeStats() {
 }
 
 func (c *Collector) UpdateCounters() {
-
-	go c.repo.Counter.Update(func(tx *MtcsTx[int64]) error {
+	c.Repo.Counter.Update(func(tx *MtcsTx[int64]) error {
 		tx.Set("PollCount", 1)
 
 		return nil
@@ -164,8 +163,8 @@ func (c *Collector) UpdateCounters() {
 }
 
 func (c *Collector) Stats() {
-	c.GaugeStats()
-	c.UpdateCounters()
+	go c.GaugeStats()
+	go c.UpdateCounters()
 }
 
 type MonitorResult struct {
@@ -173,30 +172,9 @@ type MonitorResult struct {
 	Counter map[string]int64
 }
 
-func (c *Collector) Monitor(ch chan *MonitorResult) {
+func (c *Collector) Monitor() {
 	for {
 		time.Sleep(time.Duration(c.pollInterval) * time.Second)
-		go func() {
-			m := &MonitorResult{
-				Gauge:   make(map[string]float64),
-				Counter: make(map[string]int64),
-			}
-
-			c.Stats()
-			c.repo.Gauge.Read(func(tx *MtcsTx[float64]) error {
-				m.Gauge = tx.GetAll()
-				return nil
-			})
-
-			c.repo.Counter.Read(func(tx *MtcsTx[int64]) error {
-				m.Counter = tx.GetAll()
-
-				return nil
-			})
-
-			ch <- m
-
-		}()
-
+		go c.Stats()
 	}
 }
