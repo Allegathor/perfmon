@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 
 	monserv "github.com/Allegathor/perfmon/internal/monserv"
 	"github.com/Allegathor/perfmon/internal/monserv/fw"
@@ -13,6 +15,7 @@ import (
 	"github.com/Allegathor/perfmon/internal/repo/transaction"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/sync/errgroup"
 )
 
 type flags struct {
@@ -107,20 +110,28 @@ func initLogger(mode string) *zap.Logger {
 
 func main() {
 	flag.Parse()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+		<-c
+		cancel()
+	}()
 
 	var err error
 	logger := initLogger(opts.mode).Sugar()
 
-	var gr transaction.GaugeRepo
-	var cr transaction.CounterRepo
-	gr = repo.NewMRepo[float64]()
-	cr = repo.NewMRepo[int64]()
+	var gaugeRepo transaction.GaugeRepo
+	var counterRepo transaction.CounterRepo
+	gaugeRepo = repo.NewMRepo[float64]()
+	counterRepo = repo.NewMRepo[int64]()
 
 	bkp := &fw.Backup{
 		Path:     opts.path,
 		Interval: opts.storeInterval,
-		TxGRepo:  gr,
-		TxCRepo:  cr,
+		TxGRepo:  gaugeRepo,
+		TxCRepo:  counterRepo,
 		Logger:   logger,
 	}
 
@@ -128,14 +139,23 @@ func main() {
 		bkp.RestorePrev()
 	}
 
-	go bkp.Run()
+	logger.Infof("interval is %d", opts.storeInterval)
 
-	s := monserv.NewInstance(opts.addr, logger, gr, cr)
+	s := monserv.NewInstance(opts.addr, logger, gaugeRepo, counterRepo)
 	s.MountHandlers()
 
-	logger.Infow("starting server", "addr:", opts.addr)
-	err = http.ListenAndServe(opts.addr, s.Router)
-	if err != nil {
-		panic(err.Error())
+	g, gCtx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		return s.ListenAndServe()
+	})
+	g.Go(func() error {
+		<-gCtx.Done()
+		bkp.Write()
+		return s.Shutdown(context.Background())
+	})
+
+	logger.Infow("starting server", "addr:", s.Addr)
+	if err = g.Wait(); err != nil {
+		logger.Errorf("exit reason: %s", err)
 	}
 }

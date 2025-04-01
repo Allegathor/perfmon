@@ -1,6 +1,8 @@
 package monserv
 
 import (
+	"net/http"
+
 	"github.com/Allegathor/perfmon/internal/monserv/handlers"
 	"github.com/Allegathor/perfmon/internal/monserv/middlewares"
 	"github.com/Allegathor/perfmon/internal/repo/transaction"
@@ -9,6 +11,7 @@ import (
 )
 
 type MonServ struct {
+	http.Server
 	Router        *chi.Mux
 	Logger        *zap.SugaredLogger
 	txGaugeRepo   transaction.GaugeRepo
@@ -16,30 +19,35 @@ type MonServ struct {
 }
 
 func NewInstance(addr string, l *zap.SugaredLogger, gr transaction.GaugeRepo, cr transaction.CounterRepo) *MonServ {
-	mon := &MonServ{
+	s := &MonServ{
 		Router:        chi.NewRouter(),
 		Logger:        l,
 		txGaugeRepo:   gr,
 		txCounterRepo: cr,
 	}
 
-	return mon
+	s.Server = http.Server{Addr: addr}
+
+	return s
 }
 
-func (mon *MonServ) MountHandlers() {
-	mon.Router.Use(middlewares.CreateLogger(mon.Logger), middlewares.Compress)
+func (s *MonServ) MountHandlers() {
+	r := s.Router
+	r.Use(middlewares.CreateLogger(s.Logger), middlewares.Compress)
 
-	mon.Router.Get("/", handlers.CreateRootHandler(mon.txGaugeRepo, mon.txCounterRepo, ""))
-	mon.Router.Route("/update", func(r chi.Router) {
-		r.Post("/", handlers.CreateUpdateRootHandler(mon.txGaugeRepo, mon.txCounterRepo))
+	r.Get("/", handlers.CreateRootHandler(s.txGaugeRepo, s.txCounterRepo, ""))
+	r.Route("/update", func(r chi.Router) {
+		r.Post("/", handlers.CreateUpdateRootHandler(s.txGaugeRepo, s.txCounterRepo))
 		r.Route("/{type}/{name}/{value}", func(r chi.Router) {
-			r.Post("/", handlers.CreateUpdateHandler(mon.txGaugeRepo, mon.txCounterRepo))
+			r.Post("/", handlers.CreateUpdateHandler(s.txGaugeRepo, s.txCounterRepo))
 		})
 	})
-	mon.Router.Route("/value", func(r chi.Router) {
-		r.Post("/", handlers.CreateValueRootHandler(mon.txGaugeRepo, mon.txCounterRepo))
+	r.Route("/value", func(r chi.Router) {
+		r.Post("/", handlers.CreateValueRootHandler(s.txGaugeRepo, s.txCounterRepo))
 		r.Route("/{type}/{name}", func(r chi.Router) {
-			r.Get("/", handlers.CreateValueHandler(mon.txGaugeRepo, mon.txCounterRepo))
+			r.Get("/", handlers.CreateValueHandler(s.txGaugeRepo, s.txCounterRepo))
 		})
 	})
+
+	s.Handler = s.Router
 }

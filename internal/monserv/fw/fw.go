@@ -3,6 +3,7 @@ package fw
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"time"
@@ -13,6 +14,7 @@ import (
 )
 
 type Backup struct {
+	Ctx      context.Context
 	Path     string
 	Interval uint
 	TxGRepo  transaction.GaugeRepo
@@ -25,6 +27,7 @@ func (b *Backup) RestorePrev() error {
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
 	s := bufio.NewScanner(f)
 	s.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
@@ -84,6 +87,7 @@ func (b *Backup) Write() error {
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
 	gch := make(chan map[string]float64)
 	cch := make(chan map[string]int64)
@@ -103,13 +107,12 @@ func (b *Backup) Write() error {
 	gVals := <-gch
 	cVals := <-cch
 
-	var data, pt1, pt2 []byte
+	var pt1, pt2 []byte
 	if len(gVals) > 0 {
 		pt1, err = json.Marshal(gVals)
 		if err != nil {
 			return err
 		}
-		data = append([]byte{}, '[')
 	}
 
 	if len(cVals) > 0 {
@@ -119,22 +122,34 @@ func (b *Backup) Write() error {
 		}
 	}
 
-	if len(pt1) > 2 || len(pt2) > 2 {
-		data = append(data, pt1...)
-		data = append(data, ',')
-		data = append(data, pt2...)
-		data = append(data, ']')
+	if len(pt1) < 3 && len(pt2) < 3 {
+		return nil
 	}
+
+	var data []byte
+	var slb [][]byte
+	data = append(data, '[')
+
+	if !(len(pt1) < 3) {
+		slb = append(slb, pt1)
+	}
+
+	if !(len(pt2) < 3) {
+		slb = append(slb, pt2)
+	}
+
+	data = append(data, bytes.Join(slb, []byte(","))...)
+	data = append(data, ']')
 
 	_, err = f.Write(data)
 	if err != nil {
 		return err
 	}
 
-	return f.Close()
+	return nil
 }
 
-func (b *Backup) Run() {
+func (b *Backup) Run() error {
 	for {
 		time.Sleep(time.Duration(b.Interval) * time.Second)
 		go func() {
