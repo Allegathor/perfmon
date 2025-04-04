@@ -313,6 +313,7 @@ func CreateValueRootHandler(gr GaugeRepo, cr CounterRepo) http.HandlerFunc {
 			}
 
 			rw.Header().Add("Content-Type", "application/json; charset=utf-8")
+
 			_, err = rw.Write(b)
 			if err != nil {
 				http.Error(rw, "rw error", http.StatusInternalServerError)

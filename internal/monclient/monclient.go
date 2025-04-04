@@ -58,6 +58,7 @@ func (m *MonClient) Post(p []byte) {
 	if err != nil {
 		panic(err)
 	}
+	req.Header.Add("Content-Type", "application/json")
 
 	req.Header.Add("Accept-Encoding", "gzip")
 	req.Header.Add("Content-Encoding", "gzip")
