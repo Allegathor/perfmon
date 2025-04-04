@@ -184,37 +184,7 @@ func CreateUpdateRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRep
 		} else {
 			http.Error(rw, "unsupported content type", http.StatusBadRequest)
 		}
-		fmt.Printf("value[%s] with type %s doesn't exist in the storage\n", m.MType, m.ID)
-		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in the storage", nil)
-	} else if m.MType == mondata.CounterType {
-		var (
-			v      int64
-			ok     bool
-			ch     = make(chan int64)
-			chbool = make(chan bool)
-		)
-
-		go cr.Read(func(tx repo.Tx[int64]) error {
-			value, found := tx.Get(m.ID)
-			ch <- value
-			chbool <- found
-			return nil
-		})
-
-		v, ok = <-ch, <-chbool
-		if ok {
-			return &vhData{
-				code: http.StatusOK,
-				metrics: &mondata.Metrics{
-					ID: m.ID, MType: m.MType, Delta: &v, SValue: mondata.FormatCounter(v),
-				},
-			}, nil
-		}
-		fmt.Printf("value[%s] with type %s doesn't exist in the storage\n", m.MType, m.ID)
-		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in the storage", nil)
 	}
-
-	return &vhData{code: http.StatusBadRequest}, NewRespError("incorrect request type", nil)
 }
 
 type vhData struct {
