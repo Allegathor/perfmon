@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -17,7 +19,7 @@ type flags struct {
 	pollInterval   uint
 }
 
-var defOpts = flags{
+var defOpts = &flags{
 	addr:           "http://localhost:8080",
 	reportInterval: 2,
 	pollInterval:   2,
@@ -56,8 +58,10 @@ func init() {
 	if envr != "" {
 		r, err := strconv.ParseUint(envr, 10, 32)
 		if err != nil {
-			opts.reportInterval = uint(r)
+			fmt.Println(err.Error())
+			flag.UintVar(&opts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
 		}
+		opts.reportInterval = uint(r)
 	} else {
 		flag.UintVar(&opts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
 	}
@@ -66,8 +70,10 @@ func init() {
 	if envp != "" {
 		p, err := strconv.ParseUint(envp, 10, 32)
 		if err != nil {
-			opts.reportInterval = uint(p)
+			fmt.Println(err.Error())
+			flag.UintVar(&opts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
 		}
+		opts.pollInterval = uint(p)
 	} else {
 		flag.UintVar(&opts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
 	}
@@ -76,10 +82,10 @@ func init() {
 func main() {
 	flag.Parse()
 	client := monclient.NewInstance(opts.addr, opts.reportInterval)
-	col := collector.New(opts.pollInterval)
-	ch := make(chan collector.Mtcs)
-	go col.Monitor(ch)
-	for mtcs := range ch {
-		client.PollStats(mtcs.Gauge, mtcs.Counter)
-	}
+	cl := collector.New(opts.pollInterval)
+
+	go cl.Monitor()
+	go client.PollStats(cl)
+
+	runtime.Goexit()
 }

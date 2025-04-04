@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Allegathor/perfmon/internal/repo"
+	"github.com/Allegathor/perfmon/internal/repo/transaction"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -211,7 +212,7 @@ func TestCreateUpdateHandler(t *testing.T) {
 			ch := make(chan int64)
 			time.Sleep(100 * time.Millisecond)
 			chm := make(chan map[string]int64)
-			go tt.counterRepo.Read(func(t repo.Tx[int64]) error {
+			go tt.counterRepo.Read(func(t transaction.Tx[int64]) error {
 				v, _ := t.Get(tt.want.key)
 				vm := t.GetAll()
 
@@ -387,7 +388,7 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 			ch := make(chan int64)
 			time.Sleep(100 * time.Millisecond)
 			chm := make(chan map[string]int64)
-			go tt.counterRepo.Read(func(t repo.Tx[int64]) error {
+			go tt.counterRepo.Read(func(t transaction.Tx[int64]) error {
 				v, _ := t.Get(tt.want.key)
 				vm := t.GetAll()
 

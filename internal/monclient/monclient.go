@@ -4,25 +4,31 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	"net/http"
 	"time"
 
+	"github.com/Allegathor/perfmon/internal/collector"
 	"github.com/Allegathor/perfmon/internal/mondata"
+	"github.com/go-resty/resty/v2"
 )
 
 type MonClient struct {
-	addr         string
-	updatePath   string
-	pollInterval uint
-	*http.Client
+	addr           string
+	updatePath     string
+	reportInterval uint
+	Client         *resty.Client
 }
 
 func NewInstance(addr string, interval uint) *MonClient {
+	c := resty.New()
+	c.
+		SetRetryCount(2).
+		SetRetryWaitTime(time.Duration(interval/2) * time.Second)
+
 	m := &MonClient{
-		addr:         addr,
-		updatePath:   "/update",
-		pollInterval: interval,
-		Client:       &http.Client{},
+		addr:           addr,
+		updatePath:     "/update",
+		reportInterval: interval,
+		Client:         c,
 	}
 
 	return m
@@ -54,41 +60,47 @@ func (m *MonClient) Post(p []byte) {
 	}
 	zb.Close()
 
-	req, err := http.NewRequest(http.MethodPost, m.addr+m.updatePath, &buf)
-	if err != nil {
-		panic(err)
-	}
-	req.Header.Add("Content-Type", "application/json")
+	resp, err := m.Client.R().
+		SetHeader("Accept-Encoding", "gzip").
+		SetHeader("Content-Encoding", "gzip").
+		SetHeader("Content-Type", "application/json; charset=utf-8").
+		SetBody(&buf).
+		Post(m.addr + m.updatePath)
 
-	req.Header.Add("Accept-Encoding", "gzip")
-	req.Header.Add("Content-Encoding", "gzip")
-	req.Header.Add("Content-Type", "application/json; charset=utf-8")
-
-	resp, err := m.Do(req)
 	if err != nil {
 		panic(err)
 	}
 
-	resp.Body.Close()
+	resp.RawBody().Close()
 }
 
-func (m *MonClient) PollStats(gm map[string]float64, cm map[string]int64) {
-
+func (m *MonClient) PollStats(cl *collector.Collector) {
 	for {
-		time.Sleep(time.Duration(m.pollInterval) * time.Second)
+		time.Sleep(time.Duration(m.reportInterval) * time.Second)
 		go func() {
-			for k, v := range gm {
+			var data map[string]float64
+			cl.Repo.Gauge.Read(func(tx *collector.MtcsTx[float64]) error {
+				data = tx.GetAll()
+
+				return nil
+			})
+			for k, v := range data {
 				b := buildReqBody(k, mondata.GaugeType, &v, nil)
 				m.Post(b)
 			}
 		}()
 
 		go func() {
-			for k, v := range cm {
+			var data map[string]int64
+			cl.Repo.Counter.Read(func(tx *collector.MtcsTx[int64]) error {
+				data = tx.GetAll()
+
+				return nil
+			})
+			for k, v := range data {
 				b := buildReqBody(k, mondata.CounterType, nil, &v)
 				m.Post(b)
 			}
-
 		}()
 	}
 

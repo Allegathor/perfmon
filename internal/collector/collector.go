@@ -1,98 +1,180 @@
 package collector
 
 import (
+	"math/rand/v2"
 	"runtime"
+	"sync"
 	"time"
+
+	"github.com/Allegathor/perfmon/internal/mondata"
 )
 
-type Mtcs struct {
-	Gauge   map[string]float64
-	Counter map[string]int64
+type MtcsTx[T mondata.VTypes] struct {
+	repo     *Mtcs[T]
+	writable bool
+}
+
+func (tx *MtcsTx[T]) Lock() {
+	if tx.writable {
+		tx.repo.mu.Lock()
+	} else {
+		tx.repo.mu.RLock()
+	}
+}
+
+func (tx *MtcsTx[T]) Unlock() {
+	if tx.writable {
+		tx.repo.mu.Unlock()
+	} else {
+		tx.repo.mu.RUnlock()
+	}
+}
+
+func (tx *MtcsTx[T]) Get(name string) (T, bool) {
+	v, ok := tx.repo.Data[name]
+	return v, ok
+}
+
+func (tx *MtcsTx[T]) GetAll() map[string]T {
+	return tx.repo.Data
+}
+
+func (tx *MtcsTx[T]) Set(name string, v T) {
+	tx.repo.Data[name] = v
+}
+
+type Mtcs[T mondata.VTypes] struct {
+	mu   sync.RWMutex
+	Data map[string]T
+}
+
+func (r *Mtcs[T]) Begin(writable bool) (*MtcsTx[T], error) {
+	tx := &MtcsTx[T]{
+		repo:     r,
+		writable: writable,
+	}
+	tx.Lock()
+
+	return tx, nil
+}
+
+func (r *Mtcs[T]) managed(writable bool, fn func(*MtcsTx[T]) error) (err error) {
+	tx, err := r.Begin(writable)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		tx.Unlock()
+	}()
+
+	err = fn(tx)
+	return nil
+}
+
+func (r *Mtcs[T]) Read(fn func(*MtcsTx[T]) error) error {
+	return r.managed(false, fn)
+}
+
+func (r *Mtcs[T]) Update(fn func(*MtcsTx[T]) error) error {
+	return r.managed(true, fn)
+}
+
+type Repo struct {
+	Gauge   *Mtcs[float64]
+	Counter *Mtcs[int64]
 }
 
 type Collector struct {
-	mtcs         Mtcs
+	Repo         *Repo
 	pollInterval uint
 }
 
 func New(pollInterval uint) *Collector {
-	m := Mtcs{
-		Gauge:   make(map[string]float64),
-		Counter: make(map[string]int64),
+	g := &Mtcs[float64]{
+		Data: make(map[string]float64),
 	}
+
+	c := &Mtcs[int64]{
+		Data: make(map[string]int64),
+	}
+
 	return &Collector{
-		mtcs:         m,
+		Repo: &Repo{
+			Gauge:   g,
+			Counter: c,
+		},
 		pollInterval: pollInterval,
 	}
-}
-
-func (c *Collector) SetGauge(k string, g float64) {
-	c.mtcs.Gauge[k] = g
-}
-
-func (c *Collector) SetCounter(k string, counter int64) {
-	c.mtcs.Counter[k] = counter
 }
 
 func (c *Collector) GaugeStats() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	// total
-	c.SetGauge("TotalAlloc", float64(m.TotalAlloc))
-	c.SetGauge("Sys", float64(m.Sys))
-	c.SetGauge("Lookups", float64(m.Lookups))
-	c.SetGauge("Mallocs", float64(m.Mallocs))
-	c.SetGauge("Frees", float64(m.Frees))
 
-	c.SetGauge("Alloc", float64(m.Alloc))
-	c.SetGauge("BuckHashSys", float64(m.BuckHashSys))
+	c.Repo.Gauge.Update(func(tx *MtcsTx[float64]) error {
+		// total
+		tx.Set("TotalAlloc", float64(m.TotalAlloc))
+		tx.Set("Sys", float64(m.Sys))
+		tx.Set("Lookups", float64(m.Lookups))
+		tx.Set("Mallocs", float64(m.Mallocs))
+		tx.Set("Frees", float64(m.Frees))
 
-	// heap
-	c.SetGauge("HeapAlloc", float64(m.HeapAlloc))
-	c.SetGauge("HeapIdle", float64(m.HeapIdle))
-	c.SetGauge("HeapInuse", float64(m.HeapInuse))
-	c.SetGauge("HeapObjects", float64(m.HeapObjects))
-	c.SetGauge("HeapReleased", float64(m.HeapReleased))
-	c.SetGauge("HeapSys", float64(m.HeapSys))
+		tx.Set("Alloc", float64(m.Alloc))
+		tx.Set("BuckHashSys", float64(m.BuckHashSys))
 
-	// stack
-	c.SetGauge("StackInuse", float64(m.StackInuse))
-	c.SetGauge("StackSys", float64(m.StackSys))
-	c.SetGauge("MSpanInuse", float64(m.MSpanInuse))
-	c.SetGauge("MSpanSys", float64(m.MSpanSys))
-	c.SetGauge("MCacheInuse", float64(m.MCacheInuse))
-	c.SetGauge("MCacheSys", float64(m.MCacheSys))
+		// heap
+		tx.Set("HeapAlloc", float64(m.HeapAlloc))
+		tx.Set("HeapIdle", float64(m.HeapIdle))
+		tx.Set("HeapInuse", float64(m.HeapInuse))
+		tx.Set("HeapObjects", float64(m.HeapObjects))
+		tx.Set("HeapReleased", float64(m.HeapReleased))
+		tx.Set("HeapSys", float64(m.HeapSys))
 
-	// GC
-	c.SetGauge("GCCPUFraction", float64(m.GCCPUFraction))
-	c.SetGauge("GCSys", float64(m.GCSys))
-	c.SetGauge("LastGC", float64(m.LastGC))
-	c.SetGauge("NextGC", float64(m.NextGC))
-	c.SetGauge("NumForcedGC", float64(m.NumForcedGC))
-	c.SetGauge("NumGC", float64(m.NumGC))
-	c.SetGauge("PauseTotalNs", float64(m.PauseTotalNs))
+		// stack
+		tx.Set("StackInuse", float64(m.StackInuse))
+		tx.Set("StackSys", float64(m.StackSys))
+		tx.Set("MSpanInuse", float64(m.MSpanInuse))
+		tx.Set("MSpanSys", float64(m.MSpanSys))
+		tx.Set("MCacheInuse", float64(m.MCacheInuse))
+		tx.Set("MCacheSys", float64(m.MCacheSys))
 
-	c.SetGauge("OtherSys", float64(m.OtherSys))
+		// GC
+		tx.Set("GCCPUFraction", float64(m.GCCPUFraction))
+		tx.Set("GCSys", float64(m.GCSys))
+		tx.Set("LastGC", float64(m.LastGC))
+		tx.Set("NextGC", float64(m.NextGC))
+		tx.Set("NumForcedGC", float64(m.NumForcedGC))
+		tx.Set("NumGC", float64(m.NumGC))
+		tx.Set("PauseTotalNs", float64(m.PauseTotalNs))
+
+		tx.Set("OtherSys", float64(m.OtherSys))
+		tx.Set("RandomValue", (rand.Float64()*100)+1)
+		return nil
+	})
 }
 
 func (c *Collector) UpdateCounters() {
-	c.SetCounter("RandomValue", 1)
-	c.SetCounter("PollCount", 1)
+	c.Repo.Counter.Update(func(tx *MtcsTx[int64]) error {
+		tx.Set("PollCount", 1)
+
+		return nil
+	})
 }
 
-func (c *Collector) Stats() Mtcs {
-	c.GaugeStats()
-	c.UpdateCounters()
-
-	return c.mtcs
+func (c *Collector) Stats() {
+	go c.GaugeStats()
+	go c.UpdateCounters()
 }
 
-func (c *Collector) Monitor(ch chan Mtcs) {
+type MonitorResult struct {
+	Gauge   map[string]float64
+	Counter map[string]int64
+}
+
+func (c *Collector) Monitor() {
 	for {
-		time.Sleep(2 * time.Second)
-		go func() {
-			stats := c.Stats()
-			ch <- stats
-		}()
+		time.Sleep(time.Duration(c.pollInterval) * time.Second)
+		go c.Stats()
 	}
 }
