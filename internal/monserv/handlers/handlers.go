@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/Allegathor/perfmon/internal/mondata"
 	"github.com/Allegathor/perfmon/internal/repo/transaction"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -309,5 +311,16 @@ func CreateValueRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo
 		} else {
 			http.Error(rw, "unsupported content type", http.StatusBadRequest)
 		}
+	}
+}
+
+func CreatePingHandler(db *pgx.Conn) http.HandlerFunc {
+	return func(rw http.ResponseWriter, req *http.Request) {
+		err := db.Ping(context.Background())
+		if err != nil {
+			http.Error(rw, "connection to db fail", http.StatusInternalServerError)
+		}
+
+		rw.WriteHeader(http.StatusOK)
 	}
 }

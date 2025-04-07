@@ -13,6 +13,7 @@ import (
 	"github.com/Allegathor/perfmon/internal/monserv/fw"
 	"github.com/Allegathor/perfmon/internal/repo"
 	"github.com/Allegathor/perfmon/internal/repo/transaction"
+	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
@@ -20,6 +21,7 @@ import (
 
 type flags struct {
 	addr          string
+	dbUrl         string
 	mode          string
 	path          string
 	storeInterval uint
@@ -30,6 +32,7 @@ var opts flags
 
 var defOpts = &flags{
 	addr:          "localhost:8080",
+	dbUrl:         "postgres://postgres_user:postgres_password@localhost:5432/postgres_db",
 	mode:          "dev",
 	path:          "./backup.json",
 	storeInterval: 300,
@@ -40,6 +43,11 @@ func init() {
 	opts.addr = os.Getenv("ADDRESS")
 	if opts.addr == "" {
 		flag.StringVar(&opts.addr, "a", defOpts.addr, "address to runing a server on")
+	}
+
+	opts.dbUrl = os.Getenv("DATABASE_DSN")
+	if opts.dbUrl == "" {
+		flag.StringVar(&opts.dbUrl, "d", defOpts.dbUrl, "URL for DB connection")
 	}
 
 	opts.path = os.Getenv("FILE_STORAGE_PATH")
@@ -141,7 +149,12 @@ func main() {
 
 	logger.Infof("interval is %d", opts.storeInterval)
 
-	s := monserv.NewInstance(opts.addr, logger, gaugeRepo, counterRepo)
+	conn, err := pgx.Connect(context.Background(), opts.dbUrl)
+	if err != nil {
+		logger.Errorf("unable to connect to database: %v\n", err)
+	}
+
+	s := monserv.NewInstance(opts.addr, conn, logger, gaugeRepo, counterRepo)
 	s.MountHandlers()
 
 	g, gCtx := errgroup.WithContext(ctx)

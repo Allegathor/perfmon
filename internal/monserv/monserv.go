@@ -7,19 +7,22 @@ import (
 	"github.com/Allegathor/perfmon/internal/monserv/middlewares"
 	"github.com/Allegathor/perfmon/internal/repo/transaction"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 )
 
 type MonServ struct {
 	http.Server
+	db            *pgx.Conn
 	Router        *chi.Mux
 	Logger        *zap.SugaredLogger
 	txGaugeRepo   transaction.GaugeRepo
 	txCounterRepo transaction.CounterRepo
 }
 
-func NewInstance(addr string, l *zap.SugaredLogger, gr transaction.GaugeRepo, cr transaction.CounterRepo) *MonServ {
+func NewInstance(addr string, db *pgx.Conn, l *zap.SugaredLogger, gr transaction.GaugeRepo, cr transaction.CounterRepo) *MonServ {
 	s := &MonServ{
+		db:            db,
 		Router:        chi.NewRouter(),
 		Logger:        l,
 		txGaugeRepo:   gr,
@@ -47,6 +50,9 @@ func (s *MonServ) MountHandlers() {
 		r.Route("/{type}/{name}", func(r chi.Router) {
 			r.Get("/", handlers.CreateValueHandler(s.txGaugeRepo, s.txCounterRepo))
 		})
+	})
+	r.Route("/ping", func(r chi.Router) {
+		r.Get("/", handlers.CreatePingHandler(s.db))
 	})
 
 	s.Handler = s.Router
