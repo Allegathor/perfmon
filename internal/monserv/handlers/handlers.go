@@ -249,7 +249,7 @@ func CreateUpdateBatchHandler(db MDB) http.HandlerFunc {
 			}
 
 			if len(cm) > 0 {
-				if err := db.SetGaugeAll(req.Context(), gm); err != nil {
+				if err := db.SetCounterAll(req.Context(), cm); err != nil {
 					http.Error(rw, "counter batch to db failed", http.StatusInternalServerError)
 					return
 				}
