@@ -29,7 +29,7 @@ var srvOpts flags
 
 var defSrvOpts = &flags{
 	addr:          "localhost:8080",
-	dbConnStr:     "postgres://postgres_user:postgres_pa33word@localhost:5432/postgres_db",
+	dbConnStr:     "",
 	mode:          "dev",
 	path:          "./backup.json",
 	storeInterval: 300,
