@@ -85,7 +85,7 @@ func main() {
 	cl := collector.New(opts.pollInterval)
 
 	go cl.Monitor()
-	go client.PollStats(cl)
+	go client.PollStatsBatch(cl)
 
 	runtime.Goexit()
 }
