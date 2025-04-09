@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
@@ -60,10 +61,13 @@ func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
 	})
 
 	var gj, cj []byte
-	s.Scan()
-	gj = bytes.Trim(s.Bytes(), "[,]")
-	s.Scan()
-	cj = bytes.Trim(s.Bytes(), "[,]")
+	if s.Scan() {
+		gj = bytes.Trim(s.Bytes(), "[,]")
+	}
+
+	if s.Scan() {
+		cj = bytes.Trim(s.Bytes(), "[,]")
+	}
 
 	var gaugeData mondata.GaugeMap
 	var counterData mondata.CounterMap
@@ -87,6 +91,7 @@ func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
 	db.SetGaugeAll(context.TODO(), gaugeData)
 	db.SetCounterAll(context.TODO(), counterData)
 
+	b.Logger.Info("restoring from backup success")
 	return nil
 }
 
@@ -142,14 +147,30 @@ func (b *Backup) Write(db repo.MetricsRepo) error {
 	return nil
 }
 
-func (b *Backup) Run(db repo.MetricsRepo) error {
+func (b *Backup) Schedule(ctx context.Context, db repo.MetricsRepo) error {
+	var wg sync.WaitGroup
+	ticker := time.NewTicker(time.Duration(b.Interval) * time.Second)
+	defer ticker.Stop()
+
 	for {
-		time.Sleep(time.Duration(b.Interval) * time.Second)
-		go func() {
+		select {
+		case <-ticker.C:
+			wg.Add(1)
 			err := b.Write(db)
 			if err != nil {
-				b.Logger.Errorw("error in Run() goroutine, errMsg:", err.Error())
+				wg.Done()
+				b.Logger.Errorf("scheduled backup failed with err: %v", err)
 			}
-		}()
+			wg.Done()
+			b.Logger.Info("scheduled backup succes")
+		case <-ctx.Done():
+			wg.Wait()
+			err := b.Write(db)
+			if err != nil {
+				b.Logger.Errorf("shutdown backup failed with err: %v", err)
+			}
+			b.Logger.Info("shutdown backup success")
+			return nil
+		}
 	}
 }

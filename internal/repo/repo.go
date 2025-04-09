@@ -29,24 +29,19 @@ type MetricsRepo interface {
 	MetricsGetters
 	MetricsSetters
 	Ping(ctx context.Context) error
+	Close()
 }
 
 type backupWriter interface {
 	RestorePrev(MetricsRepo) error
 	ShouldRestore() bool
-	Write(MetricsRepo) error
+	Schedule(context.Context, MetricsRepo) error
 }
 
 type Current struct {
 	MetricsRepo
 	bkp        backupWriter
 	isInMemory bool
-}
-
-func (c *Current) Dump() {
-	if c.isInMemory {
-		c.bkp.Write(c.MetricsRepo)
-	}
 }
 
 func Init(ctx context.Context, connStr string, bkp backupWriter) *Current {
@@ -60,9 +55,22 @@ func Init(ctx context.Context, connStr string, bkp backupWriter) *Current {
 	}
 
 	ms, _ := memory.Init(ctx)
-	if bkp.ShouldRestore() {
-		bkp.RestorePrev(ms)
-	}
 
 	return &Current{MetricsRepo: ms, bkp: bkp, isInMemory: true}
+}
+
+func (c *Current) Restore() error {
+	if c.bkp.ShouldRestore() {
+		return c.bkp.RestorePrev(c.MetricsRepo)
+	}
+
+	return nil
+}
+
+func (c *Current) ScheduleBackup(ctx context.Context) error {
+	if c.isInMemory {
+		return c.bkp.Schedule(ctx, c.MetricsRepo)
+	}
+
+	return nil
 }

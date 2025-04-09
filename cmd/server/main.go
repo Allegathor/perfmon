@@ -99,6 +99,7 @@ func main() {
 	}
 
 	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp)
+	db.Restore()
 
 	s := monserv.NewInstance(srvOpts.addr, db, logger)
 	s.MountHandlers()
@@ -108,8 +109,11 @@ func main() {
 		return s.ListenAndServe()
 	})
 	g.Go(func() error {
+		return db.ScheduleBackup(gCtx)
+	})
+	g.Go(func() error {
 		<-gCtx.Done()
-		db.Dump()
+		db.Close()
 		return s.Shutdown(context.Background())
 	})
 

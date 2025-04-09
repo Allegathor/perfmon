@@ -29,12 +29,12 @@ type PgSQL struct {
 }
 
 func Init(ctx context.Context, connStr string) (*PgSQL, error) {
-	conn, err := pgxpool.New(ctx, connStr)
+	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
 		return nil, err
 	}
 
-	tx, err := conn.Begin(ctx)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,11 @@ func Init(ctx context.Context, connStr string) (*PgSQL, error) {
 		return nil, err
 	}
 
-	return &PgSQL{Pool: conn}, nil
+	return &PgSQL{Pool: pool}, nil
+}
+
+func (pg *PgSQL) Close() {
+	pg.Pool.Close()
 }
 
 // MARK: gauge metrics

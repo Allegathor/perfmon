@@ -28,6 +28,10 @@ func InitEmpty() *MemorySt {
 	}
 }
 
+func (ms *MemorySt) Close() {
+	// mock
+}
+
 // MARK: gauge metrics
 func (ms *MemorySt) GetGauge(ctx context.Context, name string) (mondata.GaugeVType, bool, error) {
 	var (
