@@ -91,7 +91,7 @@ func (m *MonClient) Post(p []byte, path string) {
 	if err != nil {
 		panic(err)
 	}
-	defer zw.Close()
+	zw.Close()
 
 	resp, err := m.Client.R().
 		SetHeader("Accept-Encoding", "gzip").
