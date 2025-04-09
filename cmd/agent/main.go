@@ -21,7 +21,7 @@ type flags struct {
 
 var defOpts = &flags{
 	addr:           "http://localhost:8080",
-	reportInterval: 2,
+	reportInterval: 10,
 	pollInterval:   2,
 }
 
@@ -39,6 +39,7 @@ func setAddr(value string, defaultValue string) string {
 	return value
 }
 
+var sp = os.Getenv("FILE_STORAGE_PATH")
 var opts flags
 
 func init() {
@@ -85,7 +86,11 @@ func main() {
 	cl := collector.New(opts.pollInterval)
 
 	go cl.Monitor()
-	go client.PollStatsBatch(cl)
+	if sp != "" {
+		go client.PollStats(cl)
+	} else {
+		go client.PollStatsBatch(cl)
+	}
 
 	runtime.Goexit()
 }
