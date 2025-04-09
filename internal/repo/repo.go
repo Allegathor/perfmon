@@ -39,19 +39,24 @@ type backupWriter interface {
 
 type Current struct {
 	MetricsRepo
-	bkp backupWriter
+	bkp        backupWriter
+	isInMemory bool
 }
 
 func (c *Current) Dump() {
-	c.bkp.Write(c.MetricsRepo)
+	if c.isInMemory {
+		c.bkp.Write(c.MetricsRepo)
+	}
 }
 
 func Init(ctx context.Context, connStr string, bkp backupWriter) *Current {
+	isInMemory := true
 
 	if connStr != "" {
 		if pg, err := pgsql.Init(ctx, connStr); err != nil {
 			fmt.Println(err.Error())
 		} else {
+			isInMemory = false
 			return &Current{MetricsRepo: pg}
 		}
 	}
@@ -61,5 +66,5 @@ func Init(ctx context.Context, connStr string, bkp backupWriter) *Current {
 		bkp.RestorePrev(ms)
 	}
 
-	return &Current{MetricsRepo: ms, bkp: bkp}
+	return &Current{MetricsRepo: ms, bkp: bkp, isInMemory: isInMemory}
 }
