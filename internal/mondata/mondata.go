@@ -21,6 +21,9 @@ const (
 type (
 	GaugeVType   = float64
 	CounterVType = int64
+
+	GaugeMap   = map[string]GaugeVType
+	CounterMap = map[string]CounterVType
 )
 
 type VTypes interface {

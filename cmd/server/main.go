@@ -3,17 +3,14 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	monserv "github.com/Allegathor/perfmon/internal/monserv"
 	"github.com/Allegathor/perfmon/internal/monserv/fw"
+	"github.com/Allegathor/perfmon/internal/opts"
 	"github.com/Allegathor/perfmon/internal/repo"
-	"github.com/Allegathor/perfmon/internal/repo/transaction"
-	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
@@ -21,18 +18,18 @@ import (
 
 type flags struct {
 	addr          string
-	dbUrl         string
+	dbConnStr     string
 	mode          string
 	path          string
 	storeInterval uint
 	restore       bool
 }
 
-var opts flags
+var srvOpts flags
 
-var defOpts = &flags{
+var defSrvOpts = &flags{
 	addr:          "localhost:8080",
-	dbUrl:         "postgres://postgres_user:postgres_password@localhost:5432/postgres_db",
+	dbConnStr:     "postgres://postgres_user:postgres_pa33word@localhost:5432/postgres_db",
 	mode:          "dev",
 	path:          "./backup.json",
 	storeInterval: 300,
@@ -40,48 +37,12 @@ var defOpts = &flags{
 }
 
 func init() {
-	opts.addr = os.Getenv("ADDRESS")
-	if opts.addr == "" {
-		flag.StringVar(&opts.addr, "a", defOpts.addr, "address to runing a server on")
-	}
-
-	opts.dbUrl = os.Getenv("DATABASE_DSN")
-	if opts.dbUrl == "" {
-		flag.StringVar(&opts.dbUrl, "d", defOpts.dbUrl, "URL for DB connection")
-	}
-
-	opts.path = os.Getenv("FILE_STORAGE_PATH")
-	if opts.path == "" {
-		flag.StringVar(&opts.path, "f", defOpts.path, "path to backup file")
-	}
-
-	envIntrv := os.Getenv("STORE_INTERVAL")
-	if envIntrv != "" {
-		i, err := strconv.ParseInt(envIntrv, 10, 32)
-		if err != nil {
-			fmt.Println(err.Error())
-			flag.UintVar(&opts.storeInterval, "i", defOpts.storeInterval, "interval (in seconds) of writing to backup file")
-		}
-		opts.storeInterval = uint(i)
-	} else {
-		flag.UintVar(&opts.storeInterval, "i", defOpts.storeInterval, "interval (in seconds) of writing to backup file")
-	}
-
-	r, hasEnv := os.LookupEnv("RESTORE")
-	if hasEnv {
-		rb, err := strconv.ParseBool(r)
-		if err != nil {
-			fmt.Println(err.Error())
-			flag.BoolVar(&opts.restore, "r", defOpts.restore, "set to restore values of repo from file at start")
-		}
-		opts.restore = rb
-	} else {
-		flag.BoolVar(&opts.restore, "r", defOpts.restore, "set to restore values of repo from file at start")
-	}
-
-	if opts.mode == "" {
-		flag.StringVar(&opts.mode, "m", defOpts.mode, "set dev or prod mode")
-	}
+	opts.SetStr("ADDRESS", "a", &srvOpts.addr, defSrvOpts.addr, "address to runing a server on")
+	opts.SetStr("DATABASE_DSN", "d", &srvOpts.dbConnStr, defSrvOpts.dbConnStr, "URL for DB connection")
+	opts.SetStr("MODE", "m", &srvOpts.mode, defSrvOpts.mode, "mode of running the server: dev or prod")
+	opts.SetStr("FILE_STORAGE_PATH", "f", &srvOpts.path, defSrvOpts.path, "path to backup file")
+	opts.SetInt("STORE_INTERVAL", "s", &srvOpts.storeInterval, defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
+	opts.SetBool("RESTORE", "r", &srvOpts.restore, defSrvOpts.restore, "whether to restore from backup file on startup")
 }
 
 func initLogger(mode string) *zap.Logger {
@@ -128,33 +89,18 @@ func main() {
 	}()
 
 	var err error
-	logger := initLogger(opts.mode).Sugar()
-
-	var gaugeRepo transaction.GaugeRepo
-	var counterRepo transaction.CounterRepo
-	gaugeRepo = repo.NewMRepo[float64]()
-	counterRepo = repo.NewMRepo[int64]()
+	logger := initLogger(srvOpts.mode).Sugar()
 
 	bkp := &fw.Backup{
-		Path:     opts.path,
-		Interval: opts.storeInterval,
-		TxGRepo:  gaugeRepo,
-		TxCRepo:  counterRepo,
-		Logger:   logger,
+		Path:        srvOpts.path,
+		Interval:    srvOpts.storeInterval,
+		RestoreFlag: srvOpts.restore,
+		Logger:      logger,
 	}
 
-	if opts.restore {
-		bkp.RestorePrev()
-	}
+	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp)
 
-	logger.Infof("interval is %d", opts.storeInterval)
-
-	conn, err := pgx.Connect(context.Background(), opts.dbUrl)
-	if err != nil {
-		logger.Errorf("unable to connect to database: %v\n", err)
-	}
-
-	s := monserv.NewInstance(opts.addr, conn, logger, gaugeRepo, counterRepo)
+	s := monserv.NewInstance(srvOpts.addr, db, logger)
 	s.MountHandlers()
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -163,7 +109,7 @@ func main() {
 	})
 	g.Go(func() error {
 		<-gCtx.Done()
-		bkp.Write()
+		db.Dump()
 		return s.Shutdown(context.Background())
 	})
 

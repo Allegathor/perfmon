@@ -5,28 +5,22 @@ import (
 
 	"github.com/Allegathor/perfmon/internal/monserv/handlers"
 	"github.com/Allegathor/perfmon/internal/monserv/middlewares"
-	"github.com/Allegathor/perfmon/internal/repo/transaction"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 )
 
 type MonServ struct {
 	http.Server
-	db            *pgx.Conn
-	Router        *chi.Mux
-	Logger        *zap.SugaredLogger
-	txGaugeRepo   transaction.GaugeRepo
-	txCounterRepo transaction.CounterRepo
+	db     handlers.MDB
+	Router *chi.Mux
+	Logger *zap.SugaredLogger
 }
 
-func NewInstance(addr string, db *pgx.Conn, l *zap.SugaredLogger, gr transaction.GaugeRepo, cr transaction.CounterRepo) *MonServ {
+func NewInstance(addr string, db handlers.MDB, l *zap.SugaredLogger) *MonServ {
 	s := &MonServ{
-		db:            db,
-		Router:        chi.NewRouter(),
-		Logger:        l,
-		txGaugeRepo:   gr,
-		txCounterRepo: cr,
+		db:     db,
+		Router: chi.NewRouter(),
+		Logger: l,
 	}
 
 	s.Server = http.Server{Addr: addr}
@@ -38,17 +32,17 @@ func (s *MonServ) MountHandlers() {
 	r := s.Router
 	r.Use(middlewares.CreateLogger(s.Logger), middlewares.Compress)
 
-	r.Get("/", handlers.CreateRootHandler(s.txGaugeRepo, s.txCounterRepo, ""))
+	r.Get("/", handlers.CreateRootHandler(s.db, ""))
 	r.Route("/update", func(r chi.Router) {
-		r.Post("/", handlers.CreateUpdateRootHandler(s.txGaugeRepo, s.txCounterRepo))
+		r.Post("/", handlers.CreateUpdateRootHandler(s.db))
 		r.Route("/{type}/{name}/{value}", func(r chi.Router) {
-			r.Post("/", handlers.CreateUpdateHandler(s.txGaugeRepo, s.txCounterRepo))
+			r.Post("/", handlers.CreateUpdateHandler(s.db))
 		})
 	})
 	r.Route("/value", func(r chi.Router) {
-		r.Post("/", handlers.CreateValueRootHandler(s.txGaugeRepo, s.txCounterRepo))
+		r.Post("/", handlers.CreateValueRootHandler(s.db))
 		r.Route("/{type}/{name}", func(r chi.Router) {
-			r.Get("/", handlers.CreateValueHandler(s.txGaugeRepo, s.txCounterRepo))
+			r.Get("/", handlers.CreateValueHandler(s.db))
 		})
 	})
 	r.Route("/ping", func(r chi.Router) {

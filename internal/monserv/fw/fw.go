@@ -8,21 +8,38 @@ import (
 	"os"
 	"time"
 
+	"github.com/Allegathor/perfmon/internal/mondata"
 	"github.com/Allegathor/perfmon/internal/repo"
-	"github.com/Allegathor/perfmon/internal/repo/transaction"
 	"go.uber.org/zap"
 )
 
-type Backup struct {
-	Ctx      context.Context
-	Path     string
-	Interval uint
-	TxGRepo  transaction.GaugeRepo
-	TxCRepo  transaction.CounterRepo
-	Logger   *zap.SugaredLogger
+type Getters interface {
+	GetGaugeAll(ctx context.Context) (mondata.GaugeMap, error)
+	GetCounterAll(ctx context.Context) (mondata.CounterMap, error)
 }
 
-func (b *Backup) RestorePrev() error {
+type Setters interface {
+	SetGaugeAll(ctx context.Context, gaugeMap mondata.GaugeMap) error
+	SetCounterAll(ctx context.Context, gaugeMap mondata.CounterMap) error
+}
+
+type MDB interface {
+	Getters
+	Setters
+}
+
+type Backup struct {
+	Path        string
+	Interval    uint
+	RestoreFlag bool
+	Logger      *zap.SugaredLogger
+}
+
+func (b *Backup) ShouldRestore() bool {
+	return b.RestoreFlag
+}
+
+func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
 	f, err := os.OpenFile(b.Path, os.O_CREATE|os.O_RDONLY, 0644)
 	if err != nil {
 		return err
@@ -48,8 +65,8 @@ func (b *Backup) RestorePrev() error {
 	s.Scan()
 	cj = bytes.Trim(s.Bytes(), "[,]")
 
-	var gaugeData repo.GaugeMap
-	var counterData repo.CounterMap
+	var gaugeData mondata.GaugeMap
+	var counterData mondata.CounterMap
 
 	if len(gj) < 3 {
 		return nil
@@ -67,45 +84,21 @@ func (b *Backup) RestorePrev() error {
 		return err
 	}
 
-	go b.TxGRepo.Update(func(tx transaction.Tx[float64]) error {
-		tx.SetAll(gaugeData)
-
-		return nil
-	})
-
-	go b.TxCRepo.Update(func(tx transaction.Tx[int64]) error {
-		tx.SetAll(counterData)
-
-		return nil
-	})
+	db.SetGaugeAll(context.TODO(), gaugeData)
+	db.SetCounterAll(context.TODO(), counterData)
 
 	return nil
 }
 
-func (b *Backup) Write() error {
+func (b *Backup) Write(db repo.MetricsRepo) error {
 	f, err := os.OpenFile(b.Path, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	gch := make(chan map[string]float64)
-	cch := make(chan map[string]int64)
-
-	go b.TxGRepo.Read(func(tx transaction.Tx[float64]) error {
-		gch <- tx.GetAll()
-		return nil
-	})
-
-	go b.TxCRepo.Read(func(tx transaction.Tx[int64]) error {
-		cch <- tx.GetAll()
-		tx.GetAll()
-
-		return nil
-	})
-
-	gVals := <-gch
-	cVals := <-cch
+	gVals, _ := db.GetGaugeAll(context.TODO())
+	cVals, _ := db.GetCounterAll(context.TODO())
 
 	var pt1, pt2 []byte
 	if len(gVals) > 0 {
@@ -149,11 +142,11 @@ func (b *Backup) Write() error {
 	return nil
 }
 
-func (b *Backup) Run() error {
+func (b *Backup) Run(db repo.MetricsRepo) error {
 	for {
 		time.Sleep(time.Duration(b.Interval) * time.Second)
 		go func() {
-			err := b.Write()
+			err := b.Write(db)
 			if err != nil {
 				b.Logger.Errorw("error in Run() goroutine, errMsg:", err.Error())
 			}
