@@ -39,12 +39,18 @@ func (s *MonServ) MountHandlers() {
 			r.Post("/", handlers.CreateUpdateHandler(s.db))
 		})
 	})
+
+	r.Route("/updates", func(r chi.Router) {
+		r.Post("/", handlers.CreateUpdateBatchHandler(s.db))
+	})
+
 	r.Route("/value", func(r chi.Router) {
 		r.Post("/", handlers.CreateValueRootHandler(s.db))
 		r.Route("/{type}/{name}", func(r chi.Router) {
 			r.Get("/", handlers.CreateValueHandler(s.db))
 		})
 	})
+
 	r.Route("/ping", func(r chi.Router) {
 		r.Get("/", handlers.CreatePingHandler(s.db))
 	})
