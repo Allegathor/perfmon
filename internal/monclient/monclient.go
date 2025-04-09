@@ -57,6 +57,10 @@ func buildReqBody(name string, mtype string, g *float64, c *int64) []byte {
 func buildReqBatchBody(gm map[string]float64, cm map[string]int64) []byte {
 	mbatch := make([]mondata.Metrics, 0)
 
+	if len(gm) == 0 && len(cm) == 0 {
+		return make([]byte, 0)
+	}
+
 	for k, v := range gm {
 		mbatch = append(mbatch, mondata.Metrics{
 			ID:    k,
@@ -82,12 +86,12 @@ func buildReqBatchBody(gm map[string]float64, cm map[string]int64) []byte {
 
 func (m *MonClient) Post(p []byte, path string) {
 	var buf bytes.Buffer
-	zb := gzip.NewWriter(&buf)
-	_, err := zb.Write(p)
+	zw := gzip.NewWriter(&buf)
+	_, err := zw.Write(p)
 	if err != nil {
 		panic(err)
 	}
-	zb.Close()
+	defer zw.Close()
 
 	resp, err := m.Client.R().
 		SetHeader("Accept-Encoding", "gzip").
@@ -156,7 +160,10 @@ func (m *MonClient) PollStatsBatch(cl *collector.Collector) {
 				return nil
 			})
 
-			m.Post(buildReqBatchBody(gm, cm), updateBatchPath)
+			b := buildReqBatchBody(gm, cm)
+			if len(b) > 0 {
+				m.Post(b, updateBatchPath)
+			}
 		}()
 	}
 }
