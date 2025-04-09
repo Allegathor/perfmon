@@ -41,7 +41,7 @@ func init() {
 	opts.SetStr("DATABASE_DSN", "d", &srvOpts.dbConnStr, defSrvOpts.dbConnStr, "URL for DB connection")
 	opts.SetStr("MODE", "m", &srvOpts.mode, defSrvOpts.mode, "mode of running the server: dev or prod")
 	opts.SetStr("FILE_STORAGE_PATH", "f", &srvOpts.path, defSrvOpts.path, "path to backup file")
-	opts.SetInt("STORE_INTERVAL", "s", &srvOpts.storeInterval, defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
+	opts.SetInt("STORE_INTERVAL", "i", &srvOpts.storeInterval, defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
 	opts.SetBool("RESTORE", "r", &srvOpts.restore, defSrvOpts.restore, "whether to restore from backup file on startup")
 }
 

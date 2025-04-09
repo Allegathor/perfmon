@@ -50,14 +50,12 @@ func (c *Current) Dump() {
 }
 
 func Init(ctx context.Context, connStr string, bkp backupWriter) *Current {
-	isInMemory := true
 
 	if connStr != "" {
 		if pg, err := pgsql.Init(ctx, connStr); err != nil {
 			fmt.Println(err.Error())
 		} else {
-			isInMemory = false
-			return &Current{MetricsRepo: pg}
+			return &Current{MetricsRepo: pg, bkp: bkp, isInMemory: false}
 		}
 	}
 
@@ -66,5 +64,5 @@ func Init(ctx context.Context, connStr string, bkp backupWriter) *Current {
 		bkp.RestorePrev(ms)
 	}
 
-	return &Current{MetricsRepo: ms, bkp: bkp, isInMemory: isInMemory}
+	return &Current{MetricsRepo: ms, bkp: bkp, isInMemory: true}
 }

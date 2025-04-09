@@ -46,7 +46,7 @@ func (tx *MRepoTx[T]) SetAccumAll(data map[string]T) {
 	for k, v := range data {
 		if _, ok := tx.repo.Data[k]; ok {
 			tx.repo.Data[k] += v
-			return
+			continue
 		}
 		tx.repo.Data[k] = v
 	}
