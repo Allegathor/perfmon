@@ -32,7 +32,7 @@ func InitEmpty() *MemorySt {
 func (ms *MemorySt) GetGauge(ctx context.Context, name string) (mondata.GaugeVType, bool, error) {
 	var (
 		v  mondata.GaugeVType
-		ok bool
+		ok = false
 	)
 
 	ms.Gauge.Read(func(tx transaction.TxQry[mondata.GaugeVType]) error {
@@ -76,7 +76,7 @@ func (ms *MemorySt) SetGaugeAll(ctx context.Context, metrics mondata.GaugeMap) e
 func (ms *MemorySt) GetCounter(ctx context.Context, name string) (mondata.CounterVType, bool, error) {
 	var (
 		v  mondata.CounterVType
-		ok bool
+		ok = false
 	)
 
 	ms.Counter.Read(func(tx transaction.TxQry[mondata.CounterVType]) error {
