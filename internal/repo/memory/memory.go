@@ -105,7 +105,7 @@ func (ms *MemorySt) SetCounter(ctx context.Context, name string, value mondata.C
 
 func (ms *MemorySt) SetCounterAll(ctx context.Context, values map[string]mondata.CounterVType) error {
 	ms.Counter.Update(func(tx transaction.TxExec[mondata.CounterVType]) error {
-		tx.SetAll(values)
+		tx.SetAccumAll(values)
 		return nil
 	})
 	return nil
