@@ -224,8 +224,8 @@ func CreateUpdateBatchHandler(db MDB) http.HandlerFunc {
 			cm := make(map[string]int64)
 
 			for _, rec := range *mm {
-				if rec.ID != "" {
-					break
+				if rec.ID == "" {
+					continue
 				}
 
 				if rec.MType == mondata.GaugeType {

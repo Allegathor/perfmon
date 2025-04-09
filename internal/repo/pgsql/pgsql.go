@@ -156,13 +156,8 @@ func (pg *PgSQL) SetGaugeAll(ctx context.Context, metrics mondata.GaugeMap) erro
 	}
 	defer tx.Rollback(ctx)
 
-	_, err = tx.Prepare(ctx, "set_g_all", upsertGaugeQry)
-	if err != nil {
-		return err
-	}
-
 	for k, v := range metrics {
-		_, err = tx.Exec(ctx, "set_g_all", pgx.NamedArgs{"name": k, "value": v})
+		_, err = tx.Exec(ctx, upsertGaugeQry, pgx.NamedArgs{"name": k, "value": v})
 		if err != nil {
 			return err
 		}
@@ -269,13 +264,8 @@ func (pg *PgSQL) SetCounterAll(ctx context.Context, metrics mondata.CounterMap) 
 	}
 	defer tx.Rollback(ctx)
 
-	_, err = tx.Prepare(ctx, "set_c_all", upsertCounterQry)
-	if err != nil {
-		return err
-	}
-
 	for k, v := range metrics {
-		_, err = tx.Exec(ctx, "set_c_all", pgx.NamedArgs{"name": k, "value": v})
+		_, err = tx.Exec(ctx, upsertCounterQry, pgx.NamedArgs{"name": k, "value": v})
 		if err != nil {
 			return err
 		}
