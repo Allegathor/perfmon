@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/Allegathor/perfmon/internal/collector"
@@ -23,10 +24,29 @@ type MonClient struct {
 }
 
 func NewInstance(addr string, interval uint) *MonClient {
+	retryDelays := []time.Duration{
+		1 * time.Second,
+		3 * time.Second,
+		5 * time.Second,
+	}
+
+	retryCount := len(retryDelays)
 	c := resty.New()
 	c.
-		SetRetryCount(2).
-		SetRetryWaitTime(time.Duration(interval/2) * time.Second)
+		SetRetryCount(retryCount).
+		SetRetryWaitTime(0).
+		SetRetryAfter(func(c *resty.Client, r *resty.Response) (time.Duration, error) {
+			attempt := r.Request.Attempt
+
+			if attempt > retryCount {
+				return 0, fmt.Errorf("max retries reached")
+			}
+
+			delay := retryDelays[attempt-1]
+			fmt.Printf("Retry attempt %d, waiting %v\n", attempt, delay)
+
+			return delay, nil
+		})
 
 	m := &MonClient{
 		addr:           addr,
