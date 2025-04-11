@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
-	monserv "github.com/Allegathor/perfmon/internal/monserv"
+	"github.com/Allegathor/perfmon/internal/monserv"
 	"github.com/Allegathor/perfmon/internal/monserv/fw"
 	"github.com/Allegathor/perfmon/internal/opts"
 	"github.com/Allegathor/perfmon/internal/repo"
@@ -47,8 +49,8 @@ func init() {
 
 func initLogger(mode string) *zap.Logger {
 	var core zapcore.Core
-	if mode == "prod" {
-		f, err := os.OpenFile("logs/server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if mode == "dev" {
+		f, err := os.OpenFile("server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			panic(err)
 		}
@@ -101,7 +103,7 @@ func main() {
 	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp)
 	db.Restore()
 
-	s := monserv.NewInstance(srvOpts.addr, db, logger)
+	s := monserv.NewInstance(ctx, srvOpts.addr, db, logger)
 	s.MountHandlers()
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -113,8 +115,20 @@ func main() {
 	})
 	g.Go(func() error {
 		<-gCtx.Done()
+		timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
 		db.Close()
-		return s.Shutdown(context.Background())
+
+		go func() error {
+			<-timeoutCtx.Done()
+			if timeoutCtx.Err() == context.DeadlineExceeded {
+				return errors.New("graceful shutdown timed out")
+			}
+
+			return nil
+		}()
+
+		return s.Shutdown(timeoutCtx)
 	})
 
 	logger.Infow("starting server", "addr:", s.Addr)
