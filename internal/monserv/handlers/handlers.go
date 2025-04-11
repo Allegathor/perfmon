@@ -334,8 +334,17 @@ func CreateValueRootHandler(db MDB) http.HandlerFunc {
 				return
 			}
 
+			defer func() {
+				err := req.Body.Close()
+				if err != nil {
+					http.Error(rw, "error closing body", http.StatusInternalServerError)
+					return
+				}
+			}()
+
 			m := &mondata.Metrics{}
-			if err := json.Unmarshal(buf.Bytes(), m); err != nil {
+			err = json.Unmarshal(buf.Bytes(), m)
+			if err != nil {
 				http.Error(rw, "unmarshaling failed", http.StatusBadRequest)
 				return
 			}
@@ -360,6 +369,7 @@ func CreateValueRootHandler(db MDB) http.HandlerFunc {
 			}
 		} else {
 			http.Error(rw, "unsupported content type", http.StatusBadRequest)
+			return
 		}
 	}
 }
@@ -369,6 +379,7 @@ func CreatePingHandler(db MDB) http.HandlerFunc {
 		err := db.Ping(req.Context())
 		if err != nil {
 			http.Error(rw, "connection to db wasn't established", http.StatusInternalServerError)
+			return
 		}
 
 		rw.WriteHeader(http.StatusOK)
