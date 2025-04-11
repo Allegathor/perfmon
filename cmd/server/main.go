@@ -49,7 +49,7 @@ func init() {
 
 func initLogger(mode string) *zap.Logger {
 	var core zapcore.Core
-	if mode == "dev" {
+	if mode == "prod" {
 		f, err := os.OpenFile("server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			panic(err)
