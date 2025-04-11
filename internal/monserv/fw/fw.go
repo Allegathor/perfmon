@@ -34,6 +34,7 @@ type Backup struct {
 	Interval    uint
 	RestoreFlag bool
 	Logger      *zap.SugaredLogger
+	mu          sync.Mutex
 }
 
 func (b *Backup) ShouldRestore() bool {
@@ -41,6 +42,8 @@ func (b *Backup) ShouldRestore() bool {
 }
 
 func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	f, err := os.OpenFile(b.Path, os.O_CREATE|os.O_RDONLY, 0644)
 	if err != nil {
 		return err
@@ -95,7 +98,13 @@ func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
 	return nil
 }
 
-func (b *Backup) Write(db repo.MetricsRepo) error {
+func (b *Backup) Write(db repo.MetricsRepo, truncateFlag bool) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if truncateFlag {
+		os.Truncate(b.Path, 0)
+	}
+
 	f, err := os.OpenFile(b.Path, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -157,7 +166,7 @@ func (b *Backup) Schedule(ctx context.Context, db repo.MetricsRepo) error {
 		case <-ticker.C:
 			wg.Add(1)
 			go func() {
-				err := b.Write(db)
+				err := b.Write(db, false)
 				defer wg.Done()
 				if err != nil {
 					b.Logger.Errorf("scheduled backup failed with err: %v", err)
@@ -168,7 +177,7 @@ func (b *Backup) Schedule(ctx context.Context, db repo.MetricsRepo) error {
 			}()
 		case <-ctx.Done():
 			wg.Wait()
-			err := b.Write(db)
+			err := b.Write(db, true)
 			if err != nil {
 				b.Logger.Errorf("shutdown backup failed with err: %v", err)
 			}
