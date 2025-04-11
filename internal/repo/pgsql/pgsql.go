@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
+	"github.com/failsafe-go/failsafe-go"
+	"github.com/failsafe-go/failsafe-go/retrypolicy"
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -33,52 +35,12 @@ type PgSQL struct {
 	*pgxpool.Pool
 }
 
-func Init(ctx context.Context, connStr string) (*PgSQL, error) {
-	config, err := pgxpool.ParseConfig(connStr)
-	if err != nil {
-		return nil, err
-	}
-
-	config.MaxConns = 15
-	config.MinConns = 2
-	config.MaxConnLifetime = time.Hour
-	config.MaxConnIdleTime = 2 * time.Minute
-	config.HealthCheckPeriod = time.Minute
-
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		return nil, err
-	}
-
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-
-	_, err = tx.Exec(ctx, createGaugeQry)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = tx.Exec(ctx, createCounterQry)
-	if err != nil {
-		return nil, err
-	}
-
-	err = tx.Commit(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return &PgSQL{Pool: pool}, nil
-}
-
 func (pg *PgSQL) Close() {
 	pg.Pool.Close()
 }
 
 func IsRetryable(err error) bool {
+	var pgErr *pgconn.PgError
 	if err == nil {
 		return false
 	}
@@ -87,163 +49,118 @@ func IsRetryable(err error) bool {
 		return true
 	}
 
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		switch pgErr.Code {
-		case pgerrcode.AdminShutdown,
-			pgerrcode.CrashShutdown,
-			pgerrcode.CannotConnectNow,
-			pgerrcode.ConnectionException,
-			pgerrcode.ConnectionDoesNotExist,
-			pgerrcode.ConnectionFailure,
-			pgerrcode.SQLClientUnableToEstablishSQLConnection,
-			pgerrcode.SQLServerRejectedEstablishmentOfSQLConnection,
-			pgerrcode.TransactionResolutionUnknown,
-			pgerrcode.SerializationFailure,
-			pgerrcode.DeadlockDetected:
-			return true
-		}
+	if !errors.As(err, &pgErr) {
+		return false
 	}
 
-	return true
+	switch pgErr.Code {
+	case
+		pgerrcode.SerializationFailure,
+		pgerrcode.DeadlockDetected:
+		return true
+	}
+
+	return pgerrcode.IsConnectionException(pgErr.Code)
 }
 
-func Retry(ctx context.Context, retryCount int, initialBackoff time.Duration, fn func() error) error {
-	var err error
-	backoff := initialBackoff
+const maxRetryes = 3
 
-	for i := range retryCount {
-		err = fn()
-		if err == nil {
-			return nil
-		}
+func (pg *PgSQL) ExecuteTx(
+	ctx context.Context, txOptions pgx.TxOptions, fnc func(pgx.Tx) error,
+) error {
+	retry := retrypolicy.Builder[any]().HandleIf(func(_ any, err error) bool {
+		return IsRetryable(err)
+	}).
+		WithMaxRetries(maxRetryes).
+		WithDelayFunc(func(exec failsafe.ExecutionAttempt[any]) time.Duration {
+			return time.Second + time.Duration(exec.Attempts()-1)*2*time.Second
+		}).
+		Build()
 
-		if !IsRetryable(err) {
+	return failsafe.NewExecutor(retry).
+		WithContext(ctx).
+		RunWithExecution(func(exec failsafe.Execution[any]) (err error) {
+			ctx := exec.Context()
+			tx, err := pg.BeginTx(ctx, txOptions)
+			if err != nil {
+				return fmt.Errorf("failed to begin tx: %w", err)
+			}
+
+			defer tx.Rollback(ctx)
+
+			if err := fnc(tx); err != nil {
+				return err
+			}
+
+			if err := tx.Commit(ctx); err != nil {
+				return fmt.Errorf("failed to commit: %w", err)
+			}
+
 			return err
-		}
-
-		if i < retryCount-1 {
-			select {
-			case <-time.After(backoff):
-				backoff += 2
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-
-	return fmt.Errorf("after %d retries: %w", retryCount, err)
+		})
 }
 
-func (pg *PgSQL) QueryRowWithRetry(ctx context.Context, query string, args ...any) (pgx.Row, error) {
-	var row pgx.Row
-
-	retryErr := Retry(ctx, 3, time.Second, func() error {
-		row = pg.QueryRow(ctx, query, args...)
-		return nil
-	})
-
-	if retryErr != nil {
-		return nil, retryErr
+func Init(ctx context.Context, connStr string) (*PgSQL, error) {
+	config, err := pgxpool.ParseConfig(connStr)
+	if err != nil {
+		return nil, err
 	}
 
-	return row, nil
-}
+	config.MaxConns = 15
+	config.MinConns = 2
+	config.MaxConnIdleTime = 20 * time.Second
+	config.HealthCheckPeriod = 10 * time.Second
 
-func (pg *PgSQL) QueryWithRetry(ctx context.Context, query string, args ...any) (pgx.Rows, error) {
-	var rows pgx.Rows
-	var err error
-
-	retryErr := Retry(ctx, 3, time.Second, func() error {
-		rows, err = pg.Query(ctx, query, args...)
-		return err
-	})
-
-	if retryErr != nil {
-		return nil, retryErr
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, err
 	}
 
-	return rows, nil
-}
+	pg := &PgSQL{Pool: pool}
 
-func (pg *PgSQL) ExecWithRetry(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	var result pgconn.CommandTag
-	var err error
-
-	retryErr := Retry(ctx, 3, time.Second, func() error {
-		result, err = pg.Exec(ctx, sql, args...)
-		return err
-	})
-
-	if retryErr != nil {
-		return pgconn.NewCommandTag(""), retryErr
-	}
-
-	return result, nil
-}
-
-func (pg *PgSQL) ExecuteInTransaction(ctx context.Context, retryCount int, fn func(pgx.Tx) error) error {
-	backoff := time.Second
-
-	for i := range retryCount {
-		// Begin transaction
-		tx, err := pg.Begin(ctx)
-		if err != nil {
-			if IsRetryable(err) && i < retryCount-1 {
-				time.Sleep(backoff)
-				backoff *= 2
-				continue
-			}
-			return fmt.Errorf("failed to begin transaction: %w", err)
-		}
-
-		err = fn(tx)
-		if err == nil {
-			if commitErr := tx.Commit(ctx); commitErr != nil {
-				if IsRetryable(commitErr) && i < retryCount-1 {
-					time.Sleep(backoff)
-					backoff += 2
-					continue
-				}
-				return fmt.Errorf("failed to commit transaction: %w", commitErr)
+	pg.ExecuteTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadWrite},
+		func(tx pgx.Tx) error {
+			_, err = tx.Exec(ctx, createGaugeQry)
+			if err != nil {
+				return err
 			}
 			return nil
-		}
+		})
 
-		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
-			fmt.Printf("warning: failed to rollback transaction: %v", rollbackErr)
-		}
+	pg.ExecuteTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadWrite},
+		func(tx pgx.Tx) error {
+			_, err = tx.Exec(ctx, createCounterQry)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
 
-		if !IsRetryable(err) || i >= retryCount-1 {
-			return err
-		}
-
-		select {
-		case <-time.After(backoff):
-			backoff += 2
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	return fmt.Errorf("max retries (%d) reached", retryCount)
+	return pg, nil
 }
 
 // MARK: gauge metrics
 func (pg *PgSQL) GetGauge(ctx context.Context, name string) (mondata.GaugeVType, bool, error) {
 	var v mondata.GaugeVType
 
-	err := pg.ExecuteInTransaction(ctx, 3, func(tx pgx.Tx) error {
-		row := tx.QueryRow(ctx, `
+	err := pg.ExecuteTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadWrite},
+		func(tx pgx.Tx) error {
+			row := tx.QueryRow(ctx, `
 			SELECT value FROM gauge_m_table WHERE name = @name
 		`, pgx.NamedArgs{"name": name})
 
-		if err := row.Scan(&v); err != nil {
-			return err
-		}
+			if err := row.Scan(&v); err != nil {
+				return err
+			}
 
-		return nil
-	})
+			return nil
+		})
 	if err != nil {
 		return 0, false, err
 	}
@@ -254,30 +171,33 @@ func (pg *PgSQL) GetGauge(ctx context.Context, name string) (mondata.GaugeVType,
 func (pg *PgSQL) GetGaugeAll(ctx context.Context) (mondata.GaugeMap, error) {
 	gm := make(mondata.GaugeMap)
 
-	err := pg.ExecuteInTransaction(ctx, 3, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
+	err := pg.ExecuteTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadWrite},
+		func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `
 			SELECT name, value FROM gauge_m_table
 		`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var (
-				k string
-				v mondata.GaugeVType
-			)
-
-			if err = rows.Scan(&k, &v); err != nil {
+			if err != nil {
 				return err
 			}
+			defer rows.Close()
 
-			gm[k] = v
-		}
+			for rows.Next() {
+				var (
+					k string
+					v mondata.GaugeVType
+				)
 
-		return nil
-	})
+				if err = rows.Scan(&k, &v); err != nil {
+					return err
+				}
+
+				gm[k] = v
+			}
+
+			return nil
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -294,44 +214,53 @@ var upsertGaugeQry = `
 `
 
 func (pg *PgSQL) SetGauge(ctx context.Context, name string, value mondata.GaugeVType) error {
-	return pg.ExecuteInTransaction(ctx, 3, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, upsertGaugeQry, pgx.NamedArgs{"name": name, "value": value})
-		if err != nil {
-			return err
-		}
-
-		return nil
-	})
-}
-
-func (pg *PgSQL) SetGaugeAll(ctx context.Context, metrics mondata.GaugeMap) error {
-	return pg.ExecuteInTransaction(ctx, 3, func(tx pgx.Tx) error {
-		for k, v := range metrics {
-			_, err := tx.Exec(ctx, upsertGaugeQry, pgx.NamedArgs{"name": k, "value": v})
+	return pg.ExecuteTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadWrite},
+		func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, upsertGaugeQry, pgx.NamedArgs{"name": name, "value": value})
 			if err != nil {
 				return err
 			}
-		}
 
-		return nil
-	})
+			return nil
+		})
+}
+
+func (pg *PgSQL) SetGaugeAll(ctx context.Context, metrics mondata.GaugeMap) error {
+	return pg.ExecuteTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadWrite},
+		func(tx pgx.Tx) error {
+			for k, v := range metrics {
+				_, err := tx.Exec(ctx, upsertGaugeQry, pgx.NamedArgs{"name": k, "value": v})
+				if err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
 }
 
 // MARK: counter metrics
 func (pg *PgSQL) GetCounter(ctx context.Context, name string) (mondata.CounterVType, bool, error) {
 	var v mondata.CounterVType
 
-	err := pg.ExecuteInTransaction(ctx, 3, func(tx pgx.Tx) error {
-		row := tx.QueryRow(ctx, `
+	err := pg.ExecuteTx(
+		ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly},
+		func(tx pgx.Tx) error {
+
+			row := tx.QueryRow(ctx, `
 			SELECT value FROM counter_m_table WHERE name = @name
 		`, pgx.NamedArgs{"name": name})
 
-		if err := row.Scan(&v); err != nil {
-			return err
-		}
+			if err := row.Scan(&v); err != nil {
+				return err
+			}
 
-		return nil
-	})
+			return nil
+		})
 	if err != nil {
 		return 0, false, err
 	}
@@ -342,29 +271,32 @@ func (pg *PgSQL) GetCounter(ctx context.Context, name string) (mondata.CounterVT
 func (pg *PgSQL) GetCounterAll(ctx context.Context) (mondata.CounterMap, error) {
 	cm := make(mondata.CounterMap)
 
-	err := pg.ExecuteInTransaction(ctx, 3, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
+	err := pg.ExecuteTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadOnly},
+		func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `
 			SELECT name, value FROM counter_m_table
 		`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var (
-				k string
-				v mondata.CounterVType
-			)
-
-			if err = rows.Scan(&k, &v); err != nil {
+			if err != nil {
 				return err
 			}
+			defer rows.Close()
+			for rows.Next() {
+				var (
+					k string
+					v mondata.CounterVType
+				)
 
-			cm[k] = v
-		}
+				if err = rows.Scan(&k, &v); err != nil {
+					return err
+				}
 
-		return nil
-	})
+				cm[k] = v
+			}
+
+			return nil
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -381,25 +313,31 @@ var upsertCounterQry = `
 `
 
 func (pg *PgSQL) SetCounter(ctx context.Context, name string, value mondata.CounterVType) error {
-	return pg.ExecuteInTransaction(ctx, 3, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, upsertCounterQry, pgx.NamedArgs{"name": name, "value": value})
-		if err != nil {
-			return err
-		}
-
-		return nil
-	})
-}
-
-func (pg *PgSQL) SetCounterAll(ctx context.Context, metrics mondata.CounterMap) error {
-	return pg.ExecuteInTransaction(ctx, 3, func(tx pgx.Tx) error {
-		for k, v := range metrics {
-			_, err := tx.Exec(ctx, upsertCounterQry, pgx.NamedArgs{"name": k, "value": v})
+	return pg.ExecuteTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadWrite},
+		func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, upsertCounterQry, pgx.NamedArgs{"name": name, "value": value})
 			if err != nil {
 				return err
 			}
-		}
 
-		return nil
-	})
+			return nil
+		})
+}
+
+func (pg *PgSQL) SetCounterAll(ctx context.Context, metrics mondata.CounterMap) error {
+	return pg.ExecuteTx(
+		ctx,
+		pgx.TxOptions{AccessMode: pgx.ReadWrite},
+		func(tx pgx.Tx) error {
+			for k, v := range metrics {
+				_, err := tx.Exec(ctx, upsertCounterQry, pgx.NamedArgs{"name": k, "value": v})
+				if err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
 }
