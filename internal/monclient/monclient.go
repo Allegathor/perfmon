@@ -24,13 +24,8 @@ type MonClient struct {
 }
 
 func NewInstance(addr string, interval uint) *MonClient {
-	retryDelays := []time.Duration{
-		1 * time.Second,
-		3 * time.Second,
-		5 * time.Second,
-	}
+	retryCount := 3
 
-	retryCount := len(retryDelays)
 	c := resty.New()
 	c.
 		SetRetryCount(retryCount).
@@ -41,8 +36,8 @@ func NewInstance(addr string, interval uint) *MonClient {
 			if attempt > retryCount {
 				return 0, fmt.Errorf("max retries reached")
 			}
+			delay := time.Second + time.Duration(attempt-1)*2*time.Second
 
-			delay := retryDelays[attempt-1]
 			fmt.Printf("Retry attempt %d, waiting %v\n", attempt, delay)
 
 			return delay, nil
