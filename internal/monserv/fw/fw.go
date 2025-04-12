@@ -158,23 +158,23 @@ func (b *Backup) Write(db repo.MetricsRepo, truncateFlag bool) error {
 
 func (b *Backup) Schedule(ctx context.Context, db repo.MetricsRepo) error {
 	var wg sync.WaitGroup
-	ticker := time.NewTicker(time.Duration(300) * time.Second)
-	defer ticker.Stop()
 
 	for {
+		ticker := time.NewTicker(time.Duration(300) * time.Second)
+		defer ticker.Stop()
 		select {
 		case <-ticker.C:
-			wg.Add(1)
-			go func() {
-				err := b.Write(db, false)
-				defer wg.Done()
-				if err != nil {
-					b.Logger.Errorf("scheduled backup failed with err: %v", err)
+			// wg.Add(1)
+			// go func() {
+			// 	err := b.Write(db, false)
+			// 	defer wg.Done()
+			// 	if err != nil {
+			// 		b.Logger.Errorf("scheduled backup failed with err: %v", err)
 
-					return
-				}
-				b.Logger.Info("scheduled backup success")
-			}()
+			// 		return
+			// 	}
+			// 	b.Logger.Info("scheduled backup success")
+			// }()
 		case <-ctx.Done():
 			wg.Wait()
 			err := b.Write(db, true)
