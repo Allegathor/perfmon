@@ -80,13 +80,13 @@ func CreateRootHandler(db MDB, path string) http.HandlerFunc {
 
 		gVals, err := db.GetGaugeAll(req.Context())
 		if err != nil {
-			http.Error(rw, "error in acquaring gauge values from db", http.StatusInternalServerError)
+			http.Error(rw, "an error occured while acquaring gauge values from db", http.StatusInternalServerError)
 			return
 		}
 
 		cVals, err := db.GetCounterAll(req.Context())
 		if err != nil {
-			http.Error(rw, "error in acquaring counter values from db", http.StatusInternalServerError)
+			http.Error(rw, "an error occured while acquaring counter values from db", http.StatusInternalServerError)
 			return
 		}
 
@@ -130,7 +130,7 @@ func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespE
 
 		err := db.SetGauge(ctx, m.ID, *m.Value)
 		if err != nil {
-			return http.StatusInternalServerError, NewRespError("setting gauge value to db failed", nil)
+			return http.StatusInternalServerError, NewRespError("setting gauge value in db failed", nil)
 		}
 
 		return http.StatusOK, nil
@@ -146,7 +146,7 @@ func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespE
 
 		err := db.SetCounter(ctx, m.ID, *m.Delta)
 		if err != nil {
-			return http.StatusInternalServerError, NewRespError("setting counter value to db failed", nil)
+			return http.StatusInternalServerError, NewRespError("setting counter value in db failed", nil)
 		}
 		return http.StatusOK, nil
 
@@ -179,9 +179,17 @@ func CreateUpdateRootHandler(db MDB) http.HandlerFunc {
 
 			_, err := buf.ReadFrom(req.Body)
 			if err != nil {
-				http.Error(rw, "reading body failed", http.StatusBadRequest)
+				http.Error(rw, "working with request body failed", http.StatusBadRequest)
 				return
 			}
+
+			defer func() {
+				err := req.Body.Close()
+				if err != nil {
+					http.Error(rw, "working with request body failed", http.StatusInternalServerError)
+					return
+				}
+			}()
 
 			m := &mondata.Metrics{}
 			if err := json.Unmarshal(buf.Bytes(), m); err != nil {
@@ -209,9 +217,17 @@ func CreateUpdateBatchHandler(db MDB) http.HandlerFunc {
 
 			_, err := buf.ReadFrom(req.Body)
 			if err != nil {
-				http.Error(rw, "reading body failed", http.StatusBadRequest)
+				http.Error(rw, "working with request body failed", http.StatusBadRequest)
 				return
 			}
+
+			defer func() {
+				err := req.Body.Close()
+				if err != nil {
+					http.Error(rw, "working with request body failed", http.StatusInternalServerError)
+					return
+				}
+			}()
 
 			mm := &[]mondata.Metrics{}
 			if err := json.Unmarshal(buf.Bytes(), mm); err != nil {
@@ -242,14 +258,14 @@ func CreateUpdateBatchHandler(db MDB) http.HandlerFunc {
 
 			if len(gm) > 0 {
 				if err := db.SetGaugeAll(req.Context(), gm); err != nil {
-					http.Error(rw, "gauge batch to db failed", http.StatusInternalServerError)
+					http.Error(rw, "gauge batch update to db failed", http.StatusInternalServerError)
 					return
 				}
 			}
 
 			if len(cm) > 0 {
 				if err := db.SetCounterAll(req.Context(), cm); err != nil {
-					http.Error(rw, "counter batch to db failed", http.StatusInternalServerError)
+					http.Error(rw, "counter batch update to db failed", http.StatusInternalServerError)
 					return
 				}
 			}
@@ -327,14 +343,14 @@ func CreateValueRootHandler(db MDB) http.HandlerFunc {
 			var buf bytes.Buffer
 			_, err := buf.ReadFrom(req.Body)
 			if err != nil {
-				http.Error(rw, "reading body failed", http.StatusBadRequest)
+				http.Error(rw, "working with request body failed", http.StatusBadRequest)
 				return
 			}
 
 			defer func() {
 				err := req.Body.Close()
 				if err != nil {
-					http.Error(rw, "error closing body", http.StatusInternalServerError)
+					http.Error(rw, "working with request body failed", http.StatusInternalServerError)
 					return
 				}
 			}()

@@ -45,7 +45,7 @@ func init() {
 	opts.SetStr("MODE", "m", &srvOpts.mode, defSrvOpts.mode, "mode of running the server: dev or prod")
 	opts.SetStr("FILE_STORAGE_PATH", "f", &srvOpts.path, defSrvOpts.path, "path to backup file")
 	opts.SetInt("STORE_INTERVAL", "i", &srvOpts.storeInterval, defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
-	opts.SetBool("RESTORE", "r", &srvOpts.restore, defSrvOpts.restore, "whether to restore from backup file on startup")
+	opts.SetBool("RESTORE", "r", &srvOpts.restore, defSrvOpts.restore, "option to restore from backup file on startup")
 }
 
 func initLogger(mode string) *zap.Logger {
@@ -129,7 +129,7 @@ func main() {
 		go func() error {
 			<-timeoutCtx.Done()
 			if timeoutCtx.Err() == context.DeadlineExceeded {
-				return errors.New("graceful shutdown timed out")
+				return errors.New("timed out performing graceful shutdown")
 			}
 
 			return nil
@@ -138,7 +138,7 @@ func main() {
 		return s.Shutdown(timeoutCtx)
 	})
 
-	logger.Infow("starting server", "addr:", s.Addr)
+	logger.Infow("server was started", "addr:", s.Addr)
 	if err = g.Wait(); err != nil {
 		logger.Errorf("exit reason: %s", err)
 	}

@@ -64,9 +64,16 @@ func Init(ctx context.Context, connStr string, bkp backupWriter, logger *zap.Sug
 
 func (c *Current) Restore() error {
 	if c.bkp.ShouldRestore() {
-		return c.bkp.RestorePrev(c.MetricsRepo)
+		err := c.bkp.RestorePrev(c.MetricsRepo)
+		if err != nil {
+			c.logger.Error("values couldn't be restored from backup, error: ", err)
+			return err
+		}
+		c.logger.Info("values were restored from backup file with success")
+		return nil
 	}
 
+	c.logger.Warn("restore flag wasn't set")
 	return nil
 }
 
