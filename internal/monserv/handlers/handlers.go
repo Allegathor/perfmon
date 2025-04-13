@@ -391,7 +391,7 @@ func CreatePingHandler(db MDB) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		err := db.Ping(req.Context())
 		if err != nil {
-			http.Error(rw, "connection to db wasn't established", http.StatusInternalServerError)
+			http.Error(rw, "connection to DB wasn't established", http.StatusInternalServerError)
 			return
 		}
 
