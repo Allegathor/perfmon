@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
 )
 
 var createGaugeQry = `
@@ -33,6 +34,7 @@ var createCounterQry = `
 
 type PgSQL struct {
 	*pgxpool.Pool
+	logger *zap.SugaredLogger
 }
 
 func (pg *PgSQL) Close() {
@@ -100,7 +102,7 @@ func (pg *PgSQL) ExecuteTx(
 		})
 }
 
-func Init(ctx context.Context, connStr string) (*PgSQL, error) {
+func Init(ctx context.Context, connStr string, logger *zap.SugaredLogger) (*PgSQL, error) {
 	config, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
 		return nil, err
@@ -116,9 +118,9 @@ func Init(ctx context.Context, connStr string) (*PgSQL, error) {
 		return nil, err
 	}
 
-	pg := &PgSQL{Pool: pool}
+	pg := &PgSQL{Pool: pool, logger: logger}
 
-	pg.ExecuteTx(
+	err = pg.ExecuteTx(
 		ctx,
 		pgx.TxOptions{AccessMode: pgx.ReadWrite},
 		func(tx pgx.Tx) error {
@@ -128,8 +130,11 @@ func Init(ctx context.Context, connStr string) (*PgSQL, error) {
 			}
 			return nil
 		})
+	if err != nil {
+		return nil, err
+	}
 
-	pg.ExecuteTx(
+	err = pg.ExecuteTx(
 		ctx,
 		pgx.TxOptions{AccessMode: pgx.ReadWrite},
 		func(tx pgx.Tx) error {
@@ -139,6 +144,9 @@ func Init(ctx context.Context, connStr string) (*PgSQL, error) {
 			}
 			return nil
 		})
+	if err != nil {
+		return nil, err
+	}
 
 	return pg, nil
 }

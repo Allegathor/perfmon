@@ -2,7 +2,6 @@ package repo
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
 	"github.com/Allegathor/perfmon/internal/repo/memory"
@@ -48,15 +47,16 @@ type Current struct {
 
 func Init(ctx context.Context, connStr string, bkp backupWriter, logger *zap.SugaredLogger) *Current {
 
+	l := logger.Named("PostgreSQL DB")
 	if connStr != "" {
-		if pg, err := pgsql.Init(ctx, connStr); err != nil {
-			fmt.Println(err.Error())
+		if pg, err := pgsql.Init(ctx, connStr, l); err != nil {
+			l.Errorln("init PostgreSQL failed with error:", err)
 		} else {
-			return &Current{MetricsRepo: pg, bkp: bkp, isInMemory: false}
+			return &Current{MetricsRepo: pg, bkp: bkp, logger: l, isInMemory: false}
 		}
 	}
 
-	l := logger.Named("repo")
+	l = logger.Named("in-memory storage")
 	ms, _ := memory.Init(ctx, l)
 
 	return &Current{MetricsRepo: ms, bkp: bkp, logger: l, isInMemory: true}
