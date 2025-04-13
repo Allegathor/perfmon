@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -101,7 +102,13 @@ func main() {
 	}
 
 	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp, logger)
-	db.Restore()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		db.Restore()
+		wg.Done()
+	}()
+	wg.Wait()
 
 	s := monserv.NewInstance(ctx, srvOpts.addr, db, logger)
 	s.MountHandlers()
