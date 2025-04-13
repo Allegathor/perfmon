@@ -100,7 +100,7 @@ func main() {
 		Logger:      logger,
 	}
 
-	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp)
+	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp, logger)
 	db.Restore()
 
 	s := monserv.NewInstance(ctx, srvOpts.addr, db, logger)

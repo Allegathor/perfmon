@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"html/template"
 	"net/http"
 	"os"
@@ -285,7 +284,6 @@ func getVhData(ctx context.Context, m *mondata.Metrics, db MDB) (*vhData, *RespE
 				},
 			}, nil
 		}
-		fmt.Printf("value[%s] with type %s doesn't exist in the storage\n", m.MType, m.ID)
 		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in the storage", nil)
 	} else if m.MType == mondata.CounterType {
 		v, ok, err := db.GetCounter(ctx, m.ID)
@@ -299,7 +297,6 @@ func getVhData(ctx context.Context, m *mondata.Metrics, db MDB) (*vhData, *RespE
 				},
 			}, nil
 		}
-		fmt.Printf("value[%s] with type %s doesn't exist in the storage\n", m.MType, m.ID)
 		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in the storage", nil)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"github.com/Allegathor/perfmon/internal/mondata"
 	"github.com/Allegathor/perfmon/internal/repo/memory"
 	"github.com/Allegathor/perfmon/internal/repo/pgsql"
+	"go.uber.org/zap"
 )
 
 type MetricsGetters interface {
@@ -41,10 +42,11 @@ type backupWriter interface {
 type Current struct {
 	MetricsRepo
 	bkp        backupWriter
+	logger     *zap.SugaredLogger
 	isInMemory bool
 }
 
-func Init(ctx context.Context, connStr string, bkp backupWriter) *Current {
+func Init(ctx context.Context, connStr string, bkp backupWriter, logger *zap.SugaredLogger) *Current {
 
 	if connStr != "" {
 		if pg, err := pgsql.Init(ctx, connStr); err != nil {
@@ -54,9 +56,10 @@ func Init(ctx context.Context, connStr string, bkp backupWriter) *Current {
 		}
 	}
 
-	ms, _ := memory.Init(ctx)
+	l := logger.Named("repo")
+	ms, _ := memory.Init(ctx, l)
 
-	return &Current{MetricsRepo: ms, bkp: bkp, isInMemory: true}
+	return &Current{MetricsRepo: ms, bkp: bkp, logger: l, isInMemory: true}
 }
 
 func (c *Current) Restore() error {
