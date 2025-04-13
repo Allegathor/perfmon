@@ -29,11 +29,18 @@ func InitEmpty() *MemorySt {
 	return &MemorySt{
 		Gauge:   safe.NewMRepo[mondata.GaugeVType](),
 		Counter: safe.NewMRepo[mondata.CounterVType](),
+		logger:  nil,
 	}
 }
 
 func (ms *MemorySt) Close() {
-	// mock
+	// TODO
+}
+
+func (ms *MemorySt) log(args ...any) {
+	if ms.logger != nil {
+		ms.logger.Infoln(args...)
+	}
 }
 
 // MARK: gauge metrics
@@ -48,7 +55,7 @@ func (ms *MemorySt) GetGauge(ctx context.Context, name string) (mondata.GaugeVTy
 		return nil
 	})
 
-	ms.logger.Infoln("read gauge value from memstorage", "name:", name, "ok:", ok, "value:", v)
+	ms.log("read gauge value from memstorage", "name:", name, "ok:", ok, "value:", v)
 	return v, ok, nil
 }
 
@@ -60,7 +67,7 @@ func (ms *MemorySt) GetGaugeAll(ctx context.Context) (mondata.GaugeMap, error) {
 		return nil
 	})
 
-	ms.logger.Infoln("read all gauge values from memstorage, values:", m)
+	ms.log("read all gauge values from memstorage, values:", m)
 	return m, nil
 }
 
@@ -70,7 +77,7 @@ func (ms *MemorySt) SetGauge(ctx context.Context, name string, value mondata.Gau
 		return nil
 	})
 
-	ms.logger.Infoln("set gauge value in memstorage", "name:", name, "value:", value)
+	ms.log("set gauge value in memstorage", "name:", name, "value:", value)
 	return nil
 }
 
@@ -80,7 +87,7 @@ func (ms *MemorySt) SetGaugeAll(ctx context.Context, metrics mondata.GaugeMap) e
 		return nil
 	})
 
-	ms.logger.Infoln("set all gauge values in memstorage, values:", metrics)
+	ms.log("set all gauge values in memstorage, values:", metrics)
 	return nil
 }
 
@@ -96,7 +103,7 @@ func (ms *MemorySt) GetCounter(ctx context.Context, name string) (mondata.Counte
 		return nil
 	})
 
-	ms.logger.Infoln("read counter value from memstorage", "name:", name, "ok:", ok, "value:", v)
+	ms.log("read counter value from memstorage", "name:", name, "ok:", ok, "value:", v)
 	return v, ok, nil
 }
 
@@ -107,7 +114,7 @@ func (ms *MemorySt) GetCounterAll(ctx context.Context) (mondata.CounterMap, erro
 		return nil
 	})
 
-	ms.logger.Infoln("read all counter values from memstorage, values", m)
+	ms.log("read all counter values from memstorage, values", m)
 	return m, nil
 }
 
@@ -117,7 +124,7 @@ func (ms *MemorySt) SetCounter(ctx context.Context, name string, value mondata.C
 		return nil
 	})
 
-	ms.logger.Infoln("set counter value in memstorage", "name:", name, "value:", value)
+	ms.log("set counter value in memstorage", "name:", name, "value:", value)
 	return nil
 }
 
@@ -127,7 +134,7 @@ func (ms *MemorySt) SetCounterAll(ctx context.Context, values map[string]mondata
 		return nil
 	})
 
-	ms.logger.Infoln("set all counter values in memstorage", values)
+	ms.log("set all counter values in memstorage", values)
 	return nil
 }
 
