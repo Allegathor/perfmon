@@ -6,6 +6,8 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -106,6 +108,12 @@ func main() {
 	wg.Add(1)
 	go func() {
 		db.Restore()
+		cm := make(map[string]int64)
+		for v := range 400 {
+			key := strings.Join([]string{"GetSet", strconv.Itoa(v)}, "")
+			cm[key] = 0
+		}
+		db.SetCounterAll(context.TODO(), cm)
 		wg.Done()
 	}()
 	wg.Wait()
