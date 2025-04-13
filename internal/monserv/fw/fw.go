@@ -84,6 +84,9 @@ func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
 
 	if len(gj) > 2 {
 		gParseErr = json.Unmarshal(gj, &gaugeData)
+		if gParseErr == nil {
+			db.SetGaugeAll(context.TODO(), gaugeData)
+		}
 	} else {
 		gEmptyErr = fmt.Errorf("couldn't read any meaningful gauge values from the file: %s;", b.Path)
 	}
@@ -93,6 +96,7 @@ func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
 		if err != nil && gParseErr != nil {
 			return errors.Join(gParseErr, err)
 		}
+		db.SetCounterAll(context.TODO(), counterData)
 	} else if gEmptyErr != nil {
 		return errors.Join(
 			gEmptyErr,
@@ -100,18 +104,15 @@ func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
 		)
 	}
 
-	db.SetGaugeAll(context.TODO(), gaugeData)
-	db.SetCounterAll(context.TODO(), counterData)
-
 	return nil
 }
 
 func (b *Backup) Write(db repo.MetricsRepo, truncateFlag bool) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	// if truncateFlag {
-	// 	os.Truncate(b.Path, 0)
-	// }
+	if truncateFlag {
+		os.Truncate(b.Path, 0)
+	}
 
 	f, err := os.OpenFile(b.Path, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -128,6 +129,8 @@ func (b *Backup) Write(db repo.MetricsRepo, truncateFlag bool) error {
 		if err != nil {
 			return err
 		}
+	} else {
+		pt1 = []byte{'{', '}'}
 	}
 
 	if len(cVals) > 0 {
@@ -138,16 +141,14 @@ func (b *Backup) Write(db repo.MetricsRepo, truncateFlag bool) error {
 	}
 
 	if len(pt1) < 3 && len(pt2) < 3 {
-		return nil
+		return fmt.Errorf("nothing to write to the backup file: %s", b.Path)
 	}
 
 	var data []byte
 	var slb [][]byte
 	data = append(data, '[')
 
-	if !(len(pt1) < 3) {
-		slb = append(slb, pt1)
-	}
+	slb = append(slb, pt1)
 
 	if !(len(pt2) < 3) {
 		slb = append(slb, pt2)
@@ -186,7 +187,7 @@ func (b *Backup) Schedule(ctx context.Context, db repo.MetricsRepo) error {
 			wg.Wait()
 			err := b.Write(db, true)
 			if err != nil {
-				b.Logger.Errorf("shutdown backup failed with err: %v", err)
+				b.Logger.Errorf("shutdown backup failed with error: %v", err)
 			}
 			b.Logger.Info("shutdown backup success")
 			return nil
