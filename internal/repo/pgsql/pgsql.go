@@ -28,7 +28,7 @@ var createCounterQry = `
 	CREATE TABLE IF NOT EXISTS counter_m_table (
 		m_id SERIAL PRIMARY KEY,
 		name VARCHAR(64) UNIQUE,
-		value INTEGER NOT NULL DEFAULT 0
+		value BIGINT NOT NULL DEFAULT 0
 	);
 `
 
