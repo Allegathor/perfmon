@@ -169,7 +169,11 @@ func (pg *PgSQL) GetGauge(ctx context.Context, name string) (mondata.GaugeVType,
 
 			return nil
 		})
+
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, false, nil
+		}
 		return 0, false, err
 	}
 
@@ -218,7 +222,7 @@ var upsertGaugeQry = `
 	VALUES (@name, @value)
 	ON CONFLICT(name)
 	DO UPDATE SET
-		value = @value;
+		value = EXCLUDED.value;
 `
 
 func (pg *PgSQL) SetGauge(ctx context.Context, name string, value mondata.GaugeVType) error {
@@ -269,7 +273,11 @@ func (pg *PgSQL) GetCounter(ctx context.Context, name string) (mondata.CounterVT
 
 			return nil
 		})
+
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, false, nil
+		}
 		return 0, false, err
 	}
 
@@ -317,7 +325,7 @@ var upsertCounterQry = `
 	VALUES (@name, @value)
 	ON CONFLICT(name)
 	DO UPDATE SET
-		value = counter_m_table.value + @value;
+		value = counter_m_table.value + EXCLUDED.value;
 `
 
 func (pg *PgSQL) SetCounter(ctx context.Context, name string, value mondata.CounterVType) error {
