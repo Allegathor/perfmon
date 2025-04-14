@@ -25,12 +25,12 @@ func (opts *Options) SetStr(envName string, flagName string, value *string, defa
 }
 
 func (opts *Options) SetInt(envName string, flagName string, value *uint, defaultValue uint, usage string) {
-	ev := os.Getenv(envName)
-	if ev != "" {
+	if ev := os.Getenv(envName); ev != "" {
 		i, err := strconv.Atoi(ev)
 		if err != nil {
 			fmt.Println(err.Error())
 			opts.fgs.UintVar(value, flagName, defaultValue, usage)
+			return
 		}
 		*value = uint(i)
 	} else {
@@ -39,12 +39,12 @@ func (opts *Options) SetInt(envName string, flagName string, value *uint, defaul
 }
 
 func (opts *Options) SetBool(envName string, flagName string, value *bool, defaultValue bool, usage string) {
-	ev, hasEv := os.LookupEnv(envName)
-	if hasEv {
+	if ev, hasEv := os.LookupEnv(envName); hasEv {
 		evb, err := strconv.ParseBool(ev)
 		if err != nil {
 			fmt.Println(err.Error())
 			opts.fgs.BoolVar(value, flagName, defaultValue, usage)
+			return
 		}
 		*value = evb
 	} else {
