@@ -67,7 +67,28 @@ type MDB interface {
 	Ping(ctx context.Context) error
 }
 
-func CreateRootHandler(db MDB, path string) http.HandlerFunc {
+type ErrLogger interface {
+	Errorln(...any)
+}
+
+type API struct {
+	db     MDB
+	logger ErrLogger
+}
+
+func NewAPI(db MDB, logger ErrLogger) *API {
+	return &API{
+		db,
+		logger,
+	}
+}
+
+func (api *API) Error(rw http.ResponseWriter, err *RespError, code int) {
+	api.logger.Errorln(err)
+	http.Error(rw, err.Msg(), code)
+}
+
+func (api *API) CreateRootHandler(path string) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		type Vals interface {
 			map[string]float64 | map[string]int64
@@ -78,15 +99,17 @@ func CreateRootHandler(db MDB, path string) http.HandlerFunc {
 			Content T
 		}
 
-		gVals, err := db.GetGaugeAll(req.Context())
+		gVals, err := api.db.GetGaugeAll(req.Context())
 		if err != nil {
-			http.Error(rw, "an error occured while acquaring gauge values from db", http.StatusInternalServerError)
+			respErr := NewRespError("an error occured while acquaring gauge values from db", err)
+			api.Error(rw, respErr, http.StatusInternalServerError)
 			return
 		}
 
-		cVals, err := db.GetCounterAll(req.Context())
+		cVals, err := api.db.GetCounterAll(req.Context())
 		if err != nil {
-			http.Error(rw, "an error occured while acquaring counter values from db", http.StatusInternalServerError)
+			respErr := NewRespError("an error occured while acquaring counter values from db", err)
+			api.Error(rw, respErr, http.StatusInternalServerError)
 			return
 		}
 
@@ -102,14 +125,16 @@ func CreateRootHandler(db MDB, path string) http.HandlerFunc {
 
 		t, err := template.New("index.html").ParseFiles(path)
 		if err != nil {
-			http.Error(rw, "file parsing error", http.StatusInternalServerError)
+			respErr := NewRespError("file parsing error", err)
+			api.Error(rw, respErr, http.StatusInternalServerError)
 			return
 		}
 
 		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 		err = t.Execute(rw, viewData)
 		if err != nil {
-			http.Error(rw, "template execution error", http.StatusInternalServerError)
+			respErr := NewRespError("template execution error", err)
+			api.Error(rw, respErr, http.StatusInternalServerError)
 		}
 	}
 }
@@ -130,7 +155,7 @@ func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespE
 
 		err := db.SetGauge(ctx, m.ID, *m.Value)
 		if err != nil {
-			return http.StatusInternalServerError, NewRespError("setting gauge value in db failed", nil)
+			return http.StatusInternalServerError, NewRespError("setting gauge value in db failed", err)
 		}
 
 		return http.StatusOK, nil
@@ -146,7 +171,7 @@ func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespE
 
 		err := db.SetCounter(ctx, m.ID, *m.Delta)
 		if err != nil {
-			return http.StatusInternalServerError, NewRespError("setting counter value in db failed", nil)
+			return http.StatusInternalServerError, NewRespError("setting counter value in db failed", err)
 		}
 		return http.StatusOK, nil
 
@@ -155,126 +180,135 @@ func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespE
 	return http.StatusBadRequest, NewRespError("incorrect request type", nil)
 }
 
-func CreateUpdateHandler(db MDB) http.HandlerFunc {
-	return func(rw http.ResponseWriter, req *http.Request) {
-		var m = &mondata.Metrics{}
+func (api *API) UpdateHandler(rw http.ResponseWriter, req *http.Request) {
+	var m = &mondata.Metrics{}
 
-		m.MType = chi.URLParam(req, URLPathType)
-		m.ID = chi.URLParam(req, URLPathName)
-		m.SValue = chi.URLParam(req, URLPathValue)
-		code, err := updateMetrics(req.Context(), m, db)
+	m.MType = chi.URLParam(req, URLPathType)
+	m.ID = chi.URLParam(req, URLPathName)
+	m.SValue = chi.URLParam(req, URLPathValue)
+	code, err := updateMetrics(req.Context(), m, api.db)
+	if err != nil {
+		api.Error(rw, err, code)
+		return
+	}
+
+	rw.WriteHeader(code)
+}
+
+func (api *API) UpdateRootHandler(rw http.ResponseWriter, req *http.Request) {
+	if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
+		var buf bytes.Buffer
+
+		_, err := buf.ReadFrom(req.Body)
 		if err != nil {
-			http.Error(rw, err.Msg(), code)
+			respErr := NewRespError("working with request body failed", err)
+			api.Error(rw, respErr, http.StatusInternalServerError)
+			return
+		}
+
+		defer func() {
+			err := req.Body.Close()
+			if err != nil {
+				respErr := NewRespError("working with request body failed", err)
+				api.Error(rw, respErr, http.StatusInternalServerError)
+				return
+			}
+		}()
+
+		m := &mondata.Metrics{}
+		if err := json.Unmarshal(buf.Bytes(), m); err != nil {
+			respErr := NewRespError("unmarshaling failed", err)
+			api.Error(rw, respErr, http.StatusBadRequest)
+			return
+		}
+
+		code, respErr := updateMetrics(req.Context(), m, api.db)
+		if respErr != nil {
+			api.Error(rw, respErr, code)
 			return
 		}
 
 		rw.WriteHeader(code)
+	} else {
+		respErr := NewRespError("unsupported content type", nil)
+		api.Error(rw, respErr, http.StatusBadRequest)
 	}
 }
 
-func CreateUpdateRootHandler(db MDB) http.HandlerFunc {
-	return func(rw http.ResponseWriter, req *http.Request) {
-		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
-			var buf bytes.Buffer
+func (api *API) UpdateBatchHandler(rw http.ResponseWriter, req *http.Request) {
+	if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
+		var buf bytes.Buffer
 
-			_, err := buf.ReadFrom(req.Body)
-			if err != nil {
-				http.Error(rw, "working with request body failed", http.StatusBadRequest)
-				return
-			}
-
-			defer func() {
-				err := req.Body.Close()
-				if err != nil {
-					http.Error(rw, "working with request body failed", http.StatusInternalServerError)
-					return
-				}
-			}()
-
-			m := &mondata.Metrics{}
-			if err := json.Unmarshal(buf.Bytes(), m); err != nil {
-				http.Error(rw, "unmarshaling failed", http.StatusBadRequest)
-				return
-			}
-
-			code, respErr := updateMetrics(req.Context(), m, db)
-			if respErr != nil {
-				http.Error(rw, respErr.Msg(), code)
-				return
-			}
-
-			rw.WriteHeader(code)
-		} else {
-			http.Error(rw, "unsupported content type", http.StatusBadRequest)
+		_, err := buf.ReadFrom(req.Body)
+		if err != nil {
+			respErr := NewRespError("working with request body failed", err)
+			api.Error(rw, respErr, http.StatusInternalServerError)
+			return
 		}
-	}
-}
 
-func CreateUpdateBatchHandler(db MDB) http.HandlerFunc {
-	return func(rw http.ResponseWriter, req *http.Request) {
-		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
-			var buf bytes.Buffer
-
-			_, err := buf.ReadFrom(req.Body)
+		defer func() {
+			err := req.Body.Close()
 			if err != nil {
-				http.Error(rw, "working with request body failed", http.StatusBadRequest)
+				respErr := NewRespError("working with request body failed", err)
+				api.Error(rw, respErr, http.StatusInternalServerError)
 				return
 			}
+		}()
 
-			defer func() {
-				err := req.Body.Close()
-				if err != nil {
-					http.Error(rw, "working with request body failed", http.StatusInternalServerError)
-					return
-				}
-			}()
+		mm := &[]mondata.Metrics{}
+		if err := json.Unmarshal(buf.Bytes(), mm); err != nil {
+			respErr := NewRespError("unmarshaling failed", err)
+			api.Error(rw, respErr, http.StatusBadRequest)
+			return
+		}
 
-			mm := &[]mondata.Metrics{}
-			if err := json.Unmarshal(buf.Bytes(), mm); err != nil {
-				http.Error(rw, "unmarshaling failed", http.StatusBadRequest)
-				return
+		gm := make(map[string]float64)
+		cm := make(map[string]int64)
+
+		for _, rec := range *mm {
+			if rec.ID == "" {
+				continue
 			}
 
-			gm := make(map[string]float64)
-			cm := make(map[string]int64)
+			if rec.MType == mondata.GaugeType {
+				gm[rec.ID] = *rec.Value
 
-			for _, rec := range *mm {
-				if rec.ID == "" {
+			} else if rec.MType == mondata.CounterType {
+				if cv, ok := cm[rec.ID]; ok {
+					cm[rec.ID] = cv + *rec.Delta
 					continue
 				}
-
-				if rec.MType == mondata.GaugeType {
-					gm[rec.ID] = *rec.Value
-
-				} else if rec.MType == mondata.CounterType {
-					cm[rec.ID] = *rec.Delta
-				}
+				cm[rec.ID] = *rec.Delta
 			}
+		}
 
-			if len(gm) == 0 && len(cm) == 0 {
-				http.Error(rw, "nothing to update", http.StatusBadRequest)
+		if len(gm) == 0 && len(cm) == 0 {
+			respErr := NewRespError("nothing to update", nil)
+			api.Error(rw, respErr, http.StatusBadRequest)
+			return
+		}
+
+		if len(gm) > 0 {
+			if err := api.db.SetGaugeAll(req.Context(), gm); err != nil {
+				respErr := NewRespError("gauge batch update to db failed", err)
+				api.Error(rw, respErr, http.StatusInternalServerError)
 				return
 			}
-
-			if len(gm) > 0 {
-				if err := db.SetGaugeAll(req.Context(), gm); err != nil {
-					http.Error(rw, "gauge batch update to db failed", http.StatusInternalServerError)
-					return
-				}
-			}
-
-			if len(cm) > 0 {
-				if err := db.SetCounterAll(req.Context(), cm); err != nil {
-					http.Error(rw, "counter batch update to db failed", http.StatusInternalServerError)
-					return
-				}
-			}
-
-			rw.WriteHeader(http.StatusOK)
-
-		} else {
-			http.Error(rw, "unsupported content type", http.StatusBadRequest)
 		}
+
+		if len(cm) > 0 {
+			if err := api.db.SetCounterAll(req.Context(), cm); err != nil {
+				respErr := NewRespError("counter batch update to db failed", err)
+				api.Error(rw, respErr, http.StatusInternalServerError)
+				return
+			}
+		}
+
+		rw.WriteHeader(http.StatusOK)
+
+	} else {
+		respErr := NewRespError("unsupported content type", nil)
+		api.Error(rw, respErr, http.StatusBadRequest)
 	}
 }
 
@@ -291,7 +325,7 @@ func getVhData(ctx context.Context, m *mondata.Metrics, db MDB) (*vhData, *RespE
 	if m.MType == mondata.GaugeType {
 		v, ok, err := db.GetGauge(ctx, m.ID)
 		if err != nil {
-			return &vhData{code: http.StatusInternalServerError}, NewRespError("getting gauge value from db failed", nil)
+			return &vhData{code: http.StatusInternalServerError}, NewRespError("getting gauge value from db failed", err)
 		} else if ok {
 			return &vhData{
 				code: http.StatusOK,
@@ -304,7 +338,7 @@ func getVhData(ctx context.Context, m *mondata.Metrics, db MDB) (*vhData, *RespE
 	} else if m.MType == mondata.CounterType {
 		v, ok, err := db.GetCounter(ctx, m.ID)
 		if err != nil {
-			return &vhData{code: http.StatusInternalServerError}, NewRespError("getting counter value from db failed", nil)
+			return &vhData{code: http.StatusInternalServerError}, NewRespError("getting counter value from db failed", err)
 		} else if ok {
 			return &vhData{
 				code: http.StatusOK,
@@ -319,82 +353,83 @@ func getVhData(ctx context.Context, m *mondata.Metrics, db MDB) (*vhData, *RespE
 	return &vhData{code: http.StatusBadRequest}, NewRespError("incorrect request type", nil)
 }
 
-func CreateValueHandler(db MDB) http.HandlerFunc {
-	return func(rw http.ResponseWriter, req *http.Request) {
+func (api *API) ValueHandler(rw http.ResponseWriter, req *http.Request) {
+	m := &mondata.Metrics{}
+	m.MType = chi.URLParam(req, URLPathType)
+	m.ID = chi.URLParam(req, URLPathName)
+	vhd, respErr := getVhData(req.Context(), m, api.db)
+	if respErr != nil {
+		api.Error(rw, respErr, vhd.code)
+		return
+	}
+	_, err := rw.Write([]byte(vhd.metrics.SValue))
+	if err != nil {
+		respErr := NewRespError("rw error", err)
+		api.Error(rw, respErr, http.StatusInternalServerError)
+		return
+	}
+}
+
+func (api *API) ValueRootHandler(rw http.ResponseWriter, req *http.Request) {
+	if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
+		var buf bytes.Buffer
+		_, err := buf.ReadFrom(req.Body)
+		if err != nil {
+			respErr := NewRespError("working with request body failed", err)
+			api.Error(rw, respErr, http.StatusInternalServerError)
+			return
+		}
+
+		defer func() {
+			err := req.Body.Close()
+			if err != nil {
+				respErr := NewRespError("working with request body failed", err)
+				api.Error(rw, respErr, http.StatusInternalServerError)
+				return
+			}
+		}()
+
 		m := &mondata.Metrics{}
-		m.MType = chi.URLParam(req, URLPathType)
-		m.ID = chi.URLParam(req, URLPathName)
-		vhd, respErr := getVhData(req.Context(), m, db)
+		err = json.Unmarshal(buf.Bytes(), m)
+		if err != nil {
+			respErr := NewRespError("unmarshaling failed", err)
+			api.Error(rw, respErr, http.StatusBadRequest)
+			return
+		}
+
+		vhd, respErr := getVhData(req.Context(), m, api.db)
 		if respErr != nil {
-			http.Error(rw, respErr.Msg(), vhd.code)
+			api.Error(rw, respErr, vhd.code)
 			return
 		}
-		_, err := rw.Write([]byte(vhd.metrics.SValue))
+
+		b, err := json.Marshal(vhd.metrics)
 		if err != nil {
-			http.Error(rw, "rw error", http.StatusInternalServerError)
+			respErr := NewRespError("marshaling failed", err)
+			api.Error(rw, respErr, http.StatusInternalServerError)
 			return
 		}
+
+		rw.Header().Add("Content-Type", "application/json; charset=utf-8")
+		_, err = rw.Write(b)
+		if err != nil {
+			respErr := NewRespError("rw error", err)
+			api.Error(rw, respErr, http.StatusInternalServerError)
+			return
+		}
+	} else {
+		respErr := NewRespError("unsupported content type", nil)
+		api.Error(rw, respErr, http.StatusBadRequest)
 	}
 }
 
-func CreateValueRootHandler(db MDB) http.HandlerFunc {
-	return func(rw http.ResponseWriter, req *http.Request) {
-		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
-			var buf bytes.Buffer
-			_, err := buf.ReadFrom(req.Body)
-			if err != nil {
-				http.Error(rw, "working with request body failed", http.StatusBadRequest)
-				return
-			}
-
-			defer func() {
-				err := req.Body.Close()
-				if err != nil {
-					http.Error(rw, "working with request body failed", http.StatusInternalServerError)
-					return
-				}
-			}()
-
-			m := &mondata.Metrics{}
-			err = json.Unmarshal(buf.Bytes(), m)
-			if err != nil {
-				http.Error(rw, "unmarshaling failed", http.StatusBadRequest)
-				return
-			}
-
-			vhd, respErr := getVhData(req.Context(), m, db)
-			if respErr != nil {
-				http.Error(rw, respErr.Msg(), vhd.code)
-				return
-			}
-
-			b, err := json.Marshal(vhd.metrics)
-			if err != nil {
-				http.Error(rw, "marshaling failed", http.StatusInternalServerError)
-				return
-			}
-
-			rw.Header().Add("Content-Type", "application/json; charset=utf-8")
-			_, err = rw.Write(b)
-			if err != nil {
-				http.Error(rw, "rw error", http.StatusInternalServerError)
-				return
-			}
-		} else {
-			http.Error(rw, "unsupported content type", http.StatusBadRequest)
-			return
-		}
+func (api *API) PingHandler(rw http.ResponseWriter, req *http.Request) {
+	err := api.db.Ping(req.Context())
+	if err != nil {
+		respErr := NewRespError("connection to DB wasn't established", err)
+		api.Error(rw, respErr, http.StatusInternalServerError)
+		return
 	}
-}
 
-func CreatePingHandler(db MDB) http.HandlerFunc {
-	return func(rw http.ResponseWriter, req *http.Request) {
-		err := db.Ping(req.Context())
-		if err != nil {
-			http.Error(rw, "connection to DB wasn't established", http.StatusInternalServerError)
-			return
-		}
-
-		rw.WriteHeader(http.StatusOK)
-	}
+	rw.WriteHeader(http.StatusOK)
 }

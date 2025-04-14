@@ -30,8 +30,12 @@ func WrapWithChiCtx(req *http.Request, params map[string]string) *http.Request {
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
 }
 
+type logger struct{}
+
+func (l *logger) Errorln(...any) {}
+
 // MARK: Update
-func TestCreateUpdateHandler(t *testing.T) {
+func TestUpdateHandler(t *testing.T) {
 	type want[T int64 | float64] struct {
 		contentType string
 		code        int
@@ -187,7 +191,7 @@ func TestCreateUpdateHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := CreateUpdateHandler(tt.db)
+			h := NewAPI(tt.db, &logger{}).UpdateHandler
 			r := chi.NewRouter()
 			r.Post("/update/{type}/{name}/{value}", h)
 			recorder := httptest.NewRecorder()
@@ -217,7 +221,7 @@ func TestCreateUpdateHandler(t *testing.T) {
 
 // MARK: Update root
 
-func TestCreateUpdateRootHandler(t *testing.T) {
+func TestUpdateRootHandler(t *testing.T) {
 	type want[T int64 | float64] struct {
 		contentType string
 		code        int
@@ -348,7 +352,7 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := CreateUpdateRootHandler(tt.db)
+			h := NewAPI(tt.db, &logger{}).UpdateRootHandler
 			r := chi.NewRouter()
 			r.Post("/update", h)
 			recorder := httptest.NewRecorder()
@@ -456,7 +460,7 @@ func TestCreateRootHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			h := CreateRootHandler(tt.db, tt.filePath)
+			h := NewAPI(tt.db, &logger{}).CreateRootHandler(tt.filePath)
 			r := chi.NewRouter()
 			r.Get("/", h)
 
@@ -482,7 +486,7 @@ func TestCreateRootHandler(t *testing.T) {
 }
 
 // MARK: Value
-func TestCreateValueHandler(t *testing.T) {
+func TestValueHandler(t *testing.T) {
 	type want struct {
 		contentType string
 		code        int
@@ -601,8 +605,7 @@ func TestCreateValueHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
-			h := CreateValueHandler(tt.db)
+			h := NewAPI(tt.db, &logger{}).ValueHandler
 			r := chi.NewRouter()
 			r.Get("/value/{type}/{name}", h)
 			recorder := httptest.NewRecorder()
@@ -627,7 +630,7 @@ func TestCreateValueHandler(t *testing.T) {
 	}
 }
 
-func TestCreateValueRootHandler(t *testing.T) {
+func TestValueRootHandler(t *testing.T) {
 	type want struct {
 		contentType string
 		code        int
@@ -759,7 +762,7 @@ func TestCreateValueRootHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := CreateValueRootHandler(tt.db)
+			h := NewAPI(tt.db, &logger{}).ValueRootHandler
 			r := chi.NewRouter()
 			r.Post("/value", h)
 			recorder := httptest.NewRecorder()

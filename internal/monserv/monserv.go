@@ -33,29 +33,30 @@ func NewInstance(ctx context.Context, addr string, db handlers.MDB, l *zap.Sugar
 }
 
 func (s *MonServ) MountHandlers() {
+	api := handlers.NewAPI(s.db, s.Logger)
 	s.Router.Use(middlewares.CreateLogger(s.Logger), middlewares.CreateCompress(s.Logger))
 
-	s.Router.Get("/", handlers.CreateRootHandler(s.db, ""))
+	s.Router.Get("/", api.CreateRootHandler(""))
 	s.Router.Route("/update", func(r chi.Router) {
-		r.Post("/", handlers.CreateUpdateRootHandler(s.db))
+		r.Post("/", api.UpdateRootHandler)
 		r.Route("/{type}/{name}/{value}", func(r chi.Router) {
-			r.Post("/", handlers.CreateUpdateHandler(s.db))
+			r.Post("/", api.UpdateHandler)
 		})
 	})
 
 	s.Router.Route("/updates", func(r chi.Router) {
-		r.Post("/", handlers.CreateUpdateBatchHandler(s.db))
+		r.Post("/", api.UpdateBatchHandler)
 	})
 
 	s.Router.Route("/value", func(r chi.Router) {
-		r.Post("/", handlers.CreateValueRootHandler(s.db))
+		r.Post("/", api.ValueRootHandler)
 		r.Route("/{type}/{name}", func(r chi.Router) {
-			r.Get("/", handlers.CreateValueHandler(s.db))
+			r.Get("/", api.ValueHandler)
 		})
 	})
 
 	s.Router.Route("/ping", func(r chi.Router) {
-		r.Get("/", handlers.CreatePingHandler(s.db))
+		r.Get("/", api.PingHandler)
 	})
 
 	s.Handler = s.Router
