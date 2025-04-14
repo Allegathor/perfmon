@@ -34,7 +34,6 @@ type MetricsRepo interface {
 
 type backupWriter interface {
 	RestorePrev(MetricsRepo) error
-	ShouldRestore() bool
 	Schedule(context.Context, MetricsRepo) error
 }
 
@@ -63,7 +62,7 @@ func Init(ctx context.Context, connStr string, bkp backupWriter, logger *zap.Sug
 }
 
 func (c *Current) Restore() error {
-	if c.bkp.ShouldRestore() {
+	if c.isInMemory {
 		err := c.bkp.RestorePrev(c.MetricsRepo)
 		if err != nil {
 			c.logger.Error("values couldn't be restored from backup, error: ", err)
