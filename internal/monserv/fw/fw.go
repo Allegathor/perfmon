@@ -32,15 +32,10 @@ type MDB interface {
 }
 
 type Backup struct {
-	Path        string
-	Interval    uint
-	RestoreFlag bool
-	Logger      *zap.SugaredLogger
-	mu          sync.Mutex
-}
-
-func (b *Backup) ShouldRestore() bool {
-	return b.RestoreFlag
+	Path     string
+	Interval uint
+	Logger   *zap.SugaredLogger
+	mu       sync.Mutex
 }
 
 func (b *Backup) RestorePrev(db repo.MetricsRepo) error {

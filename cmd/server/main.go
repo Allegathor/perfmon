@@ -96,10 +96,9 @@ func main() {
 	logger := initLogger(srvOpts.mode).Sugar()
 
 	bkp := &fw.Backup{
-		Path:        srvOpts.path,
-		Interval:    srvOpts.storeInterval,
-		RestoreFlag: srvOpts.restore,
-		Logger:      logger,
+		Path:     srvOpts.path,
+		Interval: srvOpts.storeInterval,
+		Logger:   logger,
 	}
 
 	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp, logger)
