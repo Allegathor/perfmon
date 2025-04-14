@@ -17,38 +17,44 @@ func New(name string) *Options {
 	}
 }
 
-func (opts *Options) SetStr(envName string, flagName string, value *string, defaultValue string, usage string) {
-	*value = os.Getenv(envName)
-	if *value == "" {
-		opts.fgs.StringVar(value, flagName, defaultValue, usage)
+func (opts *Options) SetStr(envName string, flagName string, p *string, defaultValue string, usage string) {
+	var fv string
+	opts.fgs.StringVar(&fv, flagName, defaultValue, usage)
+	*p = os.Getenv(envName)
+	if *p == "" {
+		*p = fv
 	}
 }
 
-func (opts *Options) SetInt(envName string, flagName string, value *uint, defaultValue uint, usage string) {
+func (opts *Options) SetInt(envName string, flagName string, p *uint, defaultValue uint, usage string) {
+	var fv uint
+	opts.fgs.UintVar(&fv, flagName, defaultValue, usage)
 	if ev := os.Getenv(envName); ev != "" {
 		i, err := strconv.Atoi(ev)
 		if err != nil {
 			fmt.Println(err.Error())
-			opts.fgs.UintVar(value, flagName, defaultValue, usage)
+			*p = fv
 			return
 		}
-		*value = uint(i)
+		*p = uint(i)
 	} else {
-		opts.fgs.UintVar(value, flagName, defaultValue, usage)
+		*p = fv
 	}
 }
 
-func (opts *Options) SetBool(envName string, flagName string, value *bool, defaultValue bool, usage string) {
-	if ev, hasEv := os.LookupEnv(envName); hasEv {
-		evb, err := strconv.ParseBool(ev)
+func (opts *Options) SetBool(envName string, flagName string, p *bool, defaultValue bool, usage string) {
+	var fv bool
+	opts.fgs.BoolVar(&fv, flagName, defaultValue, usage)
+	if ev, ok := os.LookupEnv(envName); ok {
+		b, err := strconv.ParseBool(ev)
 		if err != nil {
 			fmt.Println(err.Error())
-			opts.fgs.BoolVar(value, flagName, defaultValue, usage)
+			*p = fv
 			return
 		}
-		*value = evb
+		*p = b
 	} else {
-		opts.fgs.BoolVar(value, flagName, defaultValue, usage)
+		*p = fv
 	}
 }
 
