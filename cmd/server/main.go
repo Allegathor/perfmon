@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"os"
 	"os/signal"
 	"sync"
@@ -38,15 +39,22 @@ var defSrvOpts = &flags{
 	restore:       false,
 }
 
-var opts = options.New("")
-
 func init() {
-	opts.SetStr("ADDRESS", "a", &srvOpts.addr, defSrvOpts.addr, "address to runing a server on")
-	opts.SetStr("DATABASE_DSN", "d", &srvOpts.dbConnStr, defSrvOpts.dbConnStr, "URL for DB connection")
-	opts.SetStr("MODE", "m", &srvOpts.mode, defSrvOpts.mode, "mode of running the server: dev or prod")
-	opts.SetStr("FILE_STORAGE_PATH", "f", &srvOpts.path, defSrvOpts.path, "path to backup file")
-	opts.SetInt("STORE_INTERVAL", "i", &srvOpts.storeInterval, defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
-	opts.SetBool("RESTORE", "r", &srvOpts.restore, defSrvOpts.restore, "option to restore from backup file on startup")
+	flag.StringVar(&srvOpts.addr, "a", defSrvOpts.addr, "address to runing a server on")
+	flag.StringVar(&srvOpts.dbConnStr, "d", defSrvOpts.dbConnStr, "URL for DB connection")
+	flag.StringVar(&srvOpts.mode, "m", defSrvOpts.mode, "mode of running the server: dev or prod")
+	flag.StringVar(&srvOpts.path, "f", defSrvOpts.path, "path to backup file")
+	flag.UintVar(&srvOpts.storeInterval, "i", defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
+	flag.BoolVar(&srvOpts.restore, "r", defSrvOpts.restore, "option to restore from backup file on startup")
+}
+
+func setEnv() {
+	options.SetEnvStr(&srvOpts.addr, "ADDRESS")
+	options.SetEnvStr(&srvOpts.dbConnStr, "DATABASE_DSN")
+	options.SetEnvStr(&srvOpts.mode, "MODE")
+	options.SetEnvStr(&srvOpts.path, "FILE_STORAGE_PATH")
+	options.SetEnvUint(&srvOpts.storeInterval, "STORE_INTERVAL")
+	options.SetEnvBool(&srvOpts.restore, "RESTORE")
 }
 
 func initLogger(mode string) *zap.Logger {
@@ -82,7 +90,9 @@ func initLogger(mode string) *zap.Logger {
 }
 
 func main() {
-	opts.Parse()
+	flag.Parse()
+	setEnv()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		c := make(chan os.Signal, 1)
@@ -96,9 +106,10 @@ func main() {
 	logger := initLogger(srvOpts.mode).Sugar()
 
 	bkp := &fw.Backup{
-		Path:     srvOpts.path,
-		Interval: srvOpts.storeInterval,
-		Logger:   logger,
+		Path:        srvOpts.path,
+		Interval:    srvOpts.storeInterval,
+		Logger:      logger,
+		RestoreFlag: srvOpts.restore,
 	}
 
 	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp, logger)

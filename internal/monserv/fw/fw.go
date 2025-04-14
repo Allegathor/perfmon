@@ -32,13 +32,22 @@ type MDB interface {
 }
 
 type Backup struct {
-	Path     string
-	Interval uint
-	Logger   *zap.SugaredLogger
-	mu       sync.Mutex
+	mu          sync.Mutex
+	Path        string
+	Interval    uint
+	Logger      *zap.SugaredLogger
+	RestoreFlag bool
+}
+
+func (b *Backup) ShouldRestore() bool {
+	return b.RestoreFlag
 }
 
 func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
+	if !b.ShouldRestore() {
+		return nil
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	f, err := os.OpenFile(b.Path, os.O_CREATE|os.O_RDONLY, 0644)
@@ -183,6 +192,7 @@ func (b *Backup) Schedule(ctx context.Context, db repo.MetricsRepo) error {
 			err := b.Write(db, true)
 			if err != nil {
 				b.Logger.Errorf("shutdown backup failed with error: %v", err)
+				return err
 			}
 			b.Logger.Info("shutdown backup success")
 			return nil

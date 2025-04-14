@@ -35,6 +35,7 @@ type MetricsRepo interface {
 type backupWriter interface {
 	RestorePrev(MetricsRepo) error
 	Schedule(context.Context, MetricsRepo) error
+	ShouldRestore() bool
 }
 
 type Current struct {
@@ -63,16 +64,21 @@ func Init(ctx context.Context, connStr string, bkp backupWriter, logger *zap.Sug
 
 func (c *Current) Restore() error {
 	if c.isInMemory {
-		err := c.bkp.RestorePrev(c.MetricsRepo)
-		if err != nil {
-			c.logger.Error("values couldn't be restored from backup, error: ", err)
-			return err
+		if c.bkp.ShouldRestore() {
+			err := c.bkp.RestorePrev(c.MetricsRepo)
+			if err != nil {
+				c.logger.Error("values couldn't be restored from backup, error: ", err)
+				return err
+			}
+			c.logger.Info("values were restored from backup file with success")
+			return nil
+		} else {
+			c.logger.Warn("restore: flag wasn't set")
+			return nil
 		}
-		c.logger.Info("values were restored from backup file with success")
-		return nil
 	}
 
-	c.logger.Warn("restore flag wasn't set")
+	c.logger.Warn("restore: not a memory storage ")
 	return nil
 }
 
