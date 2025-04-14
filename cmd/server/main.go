@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"os"
 	"os/signal"
 	"sync"
@@ -12,7 +11,7 @@ import (
 
 	"github.com/Allegathor/perfmon/internal/monserv"
 	"github.com/Allegathor/perfmon/internal/monserv/fw"
-	"github.com/Allegathor/perfmon/internal/opts"
+	"github.com/Allegathor/perfmon/internal/options"
 	"github.com/Allegathor/perfmon/internal/repo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -38,6 +37,8 @@ var defSrvOpts = &flags{
 	storeInterval: 300,
 	restore:       false,
 }
+
+var opts = options.New("")
 
 func init() {
 	opts.SetStr("ADDRESS", "a", &srvOpts.addr, defSrvOpts.addr, "address to runing a server on")
@@ -81,7 +82,7 @@ func initLogger(mode string) *zap.Logger {
 }
 
 func main() {
-	flag.Parse()
+	opts.Parse()
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		c := make(chan os.Signal, 1)
