@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 
-	monserv "github.com/Allegathor/perfmon/internal/monserv"
+	"github.com/Allegathor/perfmon/internal/monserv"
 	"github.com/Allegathor/perfmon/internal/monserv/fw"
-	"github.com/Allegathor/perfmon/internal/opts"
+	"github.com/Allegathor/perfmon/internal/options"
 	"github.com/Allegathor/perfmon/internal/repo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -37,18 +40,27 @@ var defSrvOpts = &flags{
 }
 
 func init() {
-	opts.SetStr("ADDRESS", "a", &srvOpts.addr, defSrvOpts.addr, "address to runing a server on")
-	opts.SetStr("DATABASE_DSN", "d", &srvOpts.dbConnStr, defSrvOpts.dbConnStr, "URL for DB connection")
-	opts.SetStr("MODE", "m", &srvOpts.mode, defSrvOpts.mode, "mode of running the server: dev or prod")
-	opts.SetStr("FILE_STORAGE_PATH", "f", &srvOpts.path, defSrvOpts.path, "path to backup file")
-	opts.SetInt("STORE_INTERVAL", "i", &srvOpts.storeInterval, defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
-	opts.SetBool("RESTORE", "r", &srvOpts.restore, defSrvOpts.restore, "whether to restore from backup file on startup")
+	flag.StringVar(&srvOpts.addr, "a", defSrvOpts.addr, "address to runing a server on")
+	flag.StringVar(&srvOpts.dbConnStr, "d", defSrvOpts.dbConnStr, "URL for DB connection")
+	flag.StringVar(&srvOpts.mode, "m", defSrvOpts.mode, "mode of running the server: dev or prod")
+	flag.StringVar(&srvOpts.path, "f", defSrvOpts.path, "path to backup file")
+	flag.UintVar(&srvOpts.storeInterval, "i", defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
+	flag.BoolVar(&srvOpts.restore, "r", defSrvOpts.restore, "option to restore from backup file on startup")
+}
+
+func setEnv() {
+	options.SetEnvStr(&srvOpts.addr, "ADDRESS")
+	options.SetEnvStr(&srvOpts.dbConnStr, "DATABASE_DSN")
+	options.SetEnvStr(&srvOpts.mode, "MODE")
+	options.SetEnvStr(&srvOpts.path, "FILE_STORAGE_PATH")
+	options.SetEnvUint(&srvOpts.storeInterval, "STORE_INTERVAL")
+	options.SetEnvBool(&srvOpts.restore, "RESTORE")
 }
 
 func initLogger(mode string) *zap.Logger {
 	var core zapcore.Core
 	if mode == "prod" {
-		f, err := os.OpenFile("logs/server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		f, err := os.OpenFile("server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			panic(err)
 		}
@@ -79,6 +91,8 @@ func initLogger(mode string) *zap.Logger {
 
 func main() {
 	flag.Parse()
+	setEnv()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		c := make(chan os.Signal, 1)
@@ -94,14 +108,20 @@ func main() {
 	bkp := &fw.Backup{
 		Path:        srvOpts.path,
 		Interval:    srvOpts.storeInterval,
-		RestoreFlag: srvOpts.restore,
 		Logger:      logger,
+		RestoreFlag: srvOpts.restore,
 	}
 
-	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp)
-	db.Restore()
+	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp, logger)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		db.Restore()
+		wg.Done()
+	}()
+	wg.Wait()
 
-	s := monserv.NewInstance(srvOpts.addr, db, logger)
+	s := monserv.NewInstance(ctx, srvOpts.addr, db, logger)
 	s.MountHandlers()
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -113,11 +133,23 @@ func main() {
 	})
 	g.Go(func() error {
 		<-gCtx.Done()
+		timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
 		db.Close()
-		return s.Shutdown(context.Background())
+
+		go func() error {
+			<-timeoutCtx.Done()
+			if timeoutCtx.Err() == context.DeadlineExceeded {
+				return errors.New("timed out performing graceful shutdown")
+			}
+
+			return nil
+		}()
+
+		return s.Shutdown(timeoutCtx)
 	})
 
-	logger.Infow("starting server", "addr:", s.Addr)
+	logger.Infow("server was started", "addr:", s.Addr)
 	if err = g.Wait(); err != nil {
 		logger.Errorf("exit reason: %s", err)
 	}

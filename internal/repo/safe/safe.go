@@ -39,7 +39,23 @@ func (tx *MRepoTx[T]) SetAccum(name string, v T) {
 }
 
 func (tx *MRepoTx[T]) SetAll(data map[string]T) {
-	tx.repo.Data = data
+	for k, v := range data {
+		if _, ok := tx.repo.Data[k]; ok {
+			tx.repo.Data[k] = v
+			continue
+		}
+		tx.repo.Data[k] = v
+	}
+}
+
+func (tx *MRepoTx[T]) SetAccumAll(data map[string]T) {
+	for k, v := range data {
+		if _, ok := tx.repo.Data[k]; ok {
+			tx.repo.Data[k] += v
+			continue
+		}
+		tx.repo.Data[k] = v
+	}
 }
 
 func (tx *MRepoTx[T]) SetAccumAll(data map[string]T) {

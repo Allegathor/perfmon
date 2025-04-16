@@ -1,6 +1,8 @@
 package monserv
 
 import (
+	"context"
+	"net"
 	"net/http"
 
 	"github.com/Allegathor/perfmon/internal/monserv/handlers"
@@ -10,49 +12,51 @@ import (
 )
 
 type MonServ struct {
-	http.Server
+	*http.Server
 	db     handlers.MDB
 	Router *chi.Mux
 	Logger *zap.SugaredLogger
 }
 
-func NewInstance(addr string, db handlers.MDB, l *zap.SugaredLogger) *MonServ {
+func NewInstance(ctx context.Context, addr string, db handlers.MDB, l *zap.SugaredLogger) *MonServ {
 	s := &MonServ{
 		db:     db,
 		Router: chi.NewRouter(),
 		Logger: l,
 	}
 
-	s.Server = http.Server{Addr: addr}
+	s.Server = &http.Server{Addr: addr, BaseContext: func(l net.Listener) context.Context {
+		return ctx
+	}}
 
 	return s
 }
 
 func (s *MonServ) MountHandlers() {
-	r := s.Router
-	r.Use(middlewares.CreateLogger(s.Logger), middlewares.Compress)
+	api := handlers.NewAPI(s.db, s.Logger)
+	s.Router.Use(middlewares.CreateLogger(s.Logger), middlewares.CreateCompress(s.Logger))
 
-	r.Get("/", handlers.CreateRootHandler(s.db, ""))
-	r.Route("/update", func(r chi.Router) {
-		r.Post("/", handlers.CreateUpdateRootHandler(s.db))
+	s.Router.Get("/", api.CreateRootHandler(""))
+	s.Router.Route("/update", func(r chi.Router) {
+		r.Post("/", api.UpdateRootHandler)
 		r.Route("/{type}/{name}/{value}", func(r chi.Router) {
-			r.Post("/", handlers.CreateUpdateHandler(s.db))
+			r.Post("/", api.UpdateHandler)
 		})
 	})
 
-	r.Route("/updates", func(r chi.Router) {
-		r.Post("/", handlers.CreateUpdateBatchHandler(s.db))
+	s.Router.Route("/updates", func(r chi.Router) {
+		r.Post("/", api.UpdateBatchHandler)
 	})
 
-	r.Route("/value", func(r chi.Router) {
-		r.Post("/", handlers.CreateValueRootHandler(s.db))
+	s.Router.Route("/value", func(r chi.Router) {
+		r.Post("/", api.ValueRootHandler)
 		r.Route("/{type}/{name}", func(r chi.Router) {
-			r.Get("/", handlers.CreateValueHandler(s.db))
+			r.Get("/", api.ValueHandler)
 		})
 	})
 
-	r.Route("/ping", func(r chi.Router) {
-		r.Get("/", handlers.CreatePingHandler(s.db))
+	s.Router.Route("/ping", func(r chi.Router) {
+		r.Get("/", api.PingHandler)
 	})
 
 	s.Handler = s.Router

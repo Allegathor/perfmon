@@ -86,11 +86,7 @@ func main() {
 	cl := collector.New(opts.pollInterval)
 
 	go cl.Monitor()
-	if sp != "" {
-		go client.PollStats(cl)
-	} else {
-		go client.PollStatsBatch(cl)
-	}
+	go client.PollStatsBatch(cl)
 
 	runtime.Goexit()
 }
