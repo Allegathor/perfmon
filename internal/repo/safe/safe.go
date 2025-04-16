@@ -58,16 +58,6 @@ func (tx *MRepoTx[T]) SetAccumAll(data map[string]T) {
 	}
 }
 
-func (tx *MRepoTx[T]) SetAccumAll(data map[string]T) {
-	for k, v := range data {
-		if _, ok := tx.repo.Data[k]; ok {
-			tx.repo.Data[k] += v
-			continue
-		}
-		tx.repo.Data[k] = v
-	}
-}
-
 func (tx *MRepoTx[T]) Lock() {
 	if tx.writable {
 		tx.repo.mu.Lock()
