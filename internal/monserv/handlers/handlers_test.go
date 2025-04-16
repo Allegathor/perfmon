@@ -8,10 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
-	"time"
 
-	"github.com/Allegathor/perfmon/internal/repo"
-	"github.com/Allegathor/perfmon/internal/repo/transaction"
+	"github.com/Allegathor/perfmon/internal/mondata"
+	"github.com/Allegathor/perfmon/internal/repo/memory"
+	"github.com/Allegathor/perfmon/internal/repo/safe"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,6 +30,7 @@ func WrapWithChiCtx(req *http.Request, params map[string]string) *http.Request {
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
 }
 
+// MARK: Update
 func TestCreateUpdateHandler(t *testing.T) {
 	type want[T int64 | float64] struct {
 		contentType string
@@ -39,12 +40,11 @@ func TestCreateUpdateHandler(t *testing.T) {
 		value       T
 	}
 	tests := []struct {
-		name        string
-		success     bool
-		req         *http.Request
-		gaugeRepo   *repo.MRepo[float64]
-		counterRepo *repo.MRepo[int64]
-		want        want[int64]
+		name    string
+		success bool
+		req     *http.Request
+		db      *memory.MemorySt
+		want    want[int64]
 	}{
 		{
 			name:    "positive test #1",
@@ -56,8 +56,7 @@ func TestCreateUpdateHandler(t *testing.T) {
 					"value": "1",
 				},
 			),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			db: memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "",
 				code:        200,
@@ -76,10 +75,10 @@ func TestCreateUpdateHandler(t *testing.T) {
 					"value": "2",
 				},
 			),
-			gaugeRepo: repo.NewMRepo[float64](),
-			counterRepo: &repo.MRepo[int64]{
-				Data: map[string]int64{
-					"PollCount": 56,
+			db: &memory.MemorySt{
+				Gauge: &safe.MRepo[mondata.GaugeVType]{},
+				Counter: &safe.MRepo[mondata.CounterVType]{
+					Data: mondata.CounterMap{"PollCount": 56},
 				},
 			},
 			want: want[int64]{
@@ -100,8 +99,7 @@ func TestCreateUpdateHandler(t *testing.T) {
 					"value": "21",
 				},
 			),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			db: memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "",
 				code:        405,
@@ -120,8 +118,7 @@ func TestCreateUpdateHandler(t *testing.T) {
 					"value": "1",
 				},
 			),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			db: memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "text/plain; charset=utf-8",
 				code:        404,
@@ -140,8 +137,7 @@ func TestCreateUpdateHandler(t *testing.T) {
 					"value": "1",
 				},
 			),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			db: memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "text/plain; charset=utf-8",
 				code:        404,
@@ -160,8 +156,7 @@ func TestCreateUpdateHandler(t *testing.T) {
 					"value": "value",
 				},
 			),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			db: memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "text/plain; charset=utf-8",
 				code:        400,
@@ -180,8 +175,7 @@ func TestCreateUpdateHandler(t *testing.T) {
 					"value": "value",
 				},
 			),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			db: memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "text/plain; charset=utf-8",
 				code:        400,
@@ -193,7 +187,7 @@ func TestCreateUpdateHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := CreateUpdateHandler(tt.gaugeRepo, tt.counterRepo)
+			h := CreateUpdateHandler(tt.db)
 			r := chi.NewRouter()
 			r.Post("/update/{type}/{name}/{value}", h)
 			recorder := httptest.NewRecorder()
@@ -209,20 +203,8 @@ func TestCreateUpdateHandler(t *testing.T) {
 			err = res.Body.Close()
 			require.NoError(t, err)
 
-			ch := make(chan int64)
-			time.Sleep(100 * time.Millisecond)
-			chm := make(chan map[string]int64)
-			go tt.counterRepo.Read(func(t transaction.Tx[int64]) error {
-				v, _ := t.Get(tt.want.key)
-				vm := t.GetAll()
-
-				ch <- v
-				chm <- vm
-				return nil
-			})
-
-			currentValue := <-ch
-			currentMap := <-chm
+			currentValue, _, _ := tt.db.GetCounter(context.TODO(), tt.want.key)
+			currentMap, _ := tt.db.GetCounterAll(context.TODO())
 
 			if tt.success {
 				assert.Contains(t, currentMap, tt.want.key)
@@ -233,6 +215,8 @@ func TestCreateUpdateHandler(t *testing.T) {
 	}
 }
 
+// MARK: Update root
+
 func TestCreateUpdateRootHandler(t *testing.T) {
 	type want[T int64 | float64] struct {
 		contentType string
@@ -242,12 +226,11 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 		value       T
 	}
 	tests := []struct {
-		name        string
-		success     bool
-		req         *http.Request
-		gaugeRepo   *repo.MRepo[float64]
-		counterRepo *repo.MRepo[int64]
-		want        want[int64]
+		name    string
+		success bool
+		req     *http.Request
+		db      *memory.MemorySt
+		want    want[int64]
 	}{
 		{
 			name:    "positive test #1",
@@ -256,8 +239,7 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 				httptest.NewRequest("POST", "/update",
 					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"counter","delta":99}`))),
 				nil),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			db: memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "",
 				code:        200,
@@ -273,10 +255,12 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 				httptest.NewRequest("POST", "/update",
 					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"counter","delta":50}`))),
 				nil),
-			gaugeRepo: repo.NewMRepo[float64](),
-			counterRepo: &repo.MRepo[int64]{
-				Data: map[string]int64{
-					"PollCount": 101,
+			db: &memory.MemorySt{
+				Gauge: &safe.MRepo[mondata.GaugeVType]{},
+				Counter: &safe.MRepo[mondata.CounterVType]{
+					Data: mondata.CounterMap{
+						"PollCount": 101,
+					},
 				},
 			},
 			want: want[int64]{
@@ -288,11 +272,10 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 			},
 		},
 		{
-			name:        "negative test #1 (method not allowed)",
-			success:     false,
-			req:         WrapWithChiCtx(httptest.NewRequest("GET", "/update", nil), nil),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			name:    "negative test #1 (method not allowed)",
+			success: false,
+			req:     WrapWithChiCtx(httptest.NewRequest("GET", "/update", nil), nil),
+			db:      memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "",
 				code:        405,
@@ -302,11 +285,10 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 			},
 		},
 		{
-			name:        "negative test #2 (not found)",
-			success:     false,
-			req:         WrapWithChiCtx(httptest.NewRequest("POST", "/updat", nil), nil),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			name:    "negative test #2 (not found)",
+			success: false,
+			req:     WrapWithChiCtx(httptest.NewRequest("POST", "/updat", nil), nil),
+			db:      memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "text/plain; charset=utf-8",
 				code:        404,
@@ -322,8 +304,7 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 				httptest.NewRequest("POST", "/update",
 					bytes.NewBuffer([]byte(`{"id":"","type":"counter","delta":50}`))),
 				nil),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			db: memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "text/plain; charset=utf-8",
 				code:        404,
@@ -339,8 +320,7 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 				httptest.NewRequest("POST", "/update",
 					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"counter","value":"one"}`))),
 				nil),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			db: memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "text/plain; charset=utf-8",
 				code:        400,
@@ -356,8 +336,7 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 				httptest.NewRequest("POST", "/update",
 					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"sometype","value":1}`))),
 				nil),
-			gaugeRepo:   repo.NewMRepo[float64](),
-			counterRepo: repo.NewMRepo[int64](),
+			db: memory.InitEmpty(),
 			want: want[int64]{
 				contentType: "text/plain; charset=utf-8",
 				code:        400,
@@ -369,7 +348,7 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := CreateUpdateRootHandler(tt.gaugeRepo, tt.counterRepo)
+			h := CreateUpdateRootHandler(tt.db)
 			r := chi.NewRouter()
 			r.Post("/update", h)
 			recorder := httptest.NewRecorder()
@@ -385,20 +364,8 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 			err = res.Body.Close()
 			require.NoError(t, err)
 
-			ch := make(chan int64)
-			time.Sleep(100 * time.Millisecond)
-			chm := make(chan map[string]int64)
-			go tt.counterRepo.Read(func(t transaction.Tx[int64]) error {
-				v, _ := t.Get(tt.want.key)
-				vm := t.GetAll()
-
-				ch <- v
-				chm <- vm
-				return nil
-			})
-
-			currentValue := <-ch
-			currentMap := <-chm
+			currentValue, _, _ := tt.db.GetCounter(context.TODO(), tt.want.key)
+			currentMap, _ := tt.db.GetCounterAll(context.TODO())
 
 			if tt.success {
 				assert.Contains(t, currentMap, tt.want.key)
@@ -409,6 +376,7 @@ func TestCreateUpdateRootHandler(t *testing.T) {
 	}
 }
 
+// MARK: Root
 func TestCreateRootHandler(t *testing.T) {
 	dir, _ := os.Getwd()
 	type want struct {
@@ -418,23 +386,24 @@ func TestCreateRootHandler(t *testing.T) {
 		name        string
 	}
 	tests := []struct {
-		name        string
-		filePath    string
-		success     bool
-		req         *http.Request
-		gaugeRepo   *repo.MRepo[float64]
-		counterRepo *repo.MRepo[int64]
-		want        want
+		name     string
+		filePath string
+		success  bool
+		req      *http.Request
+		db       *memory.MemorySt
+		want     want
 	}{
 		{
-			name:      "positive test #1",
-			success:   true,
-			req:       WrapWithChiCtx(httptest.NewRequest("GET", "/", nil), nil),
-			filePath:  dir + "/../../../templates/index.html",
-			gaugeRepo: repo.NewMRepo[float64](),
-			counterRepo: &repo.MRepo[int64]{
-				Data: map[string]int64{
-					"PollCount": 1,
+			name:     "positive test #1",
+			success:  true,
+			req:      WrapWithChiCtx(httptest.NewRequest("GET", "/", nil), nil),
+			filePath: dir + "/../../../templates/index.html",
+			db: &memory.MemorySt{
+				Gauge: &safe.MRepo[mondata.GaugeVType]{},
+				Counter: &safe.MRepo[mondata.CounterVType]{
+					Data: mondata.CounterMap{
+						"PollCount": 1,
+					},
 				},
 			},
 			want: want{
@@ -445,14 +414,16 @@ func TestCreateRootHandler(t *testing.T) {
 			},
 		},
 		{
-			name:        "positive test #2",
-			success:     true,
-			req:         WrapWithChiCtx(httptest.NewRequest("GET", "/", nil), nil),
-			filePath:    dir + "/../../../templates/index.html",
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo: &repo.MRepo[float64]{
-				Data: map[string]float64{
-					"Alloc": 1030.0012,
+			name:     "positive test #2",
+			success:  true,
+			req:      WrapWithChiCtx(httptest.NewRequest("GET", "/", nil), nil),
+			filePath: dir + "/../../../templates/index.html",
+			db: &memory.MemorySt{
+				Counter: &safe.MRepo[mondata.CounterVType]{},
+				Gauge: &safe.MRepo[mondata.GaugeVType]{
+					Data: mondata.GaugeMap{
+						"Alloc": 1030.0012,
+					},
 				},
 			},
 			want: want{
@@ -463,13 +434,15 @@ func TestCreateRootHandler(t *testing.T) {
 			},
 		},
 		{
-			name:        "negative test #1",
-			success:     false,
-			req:         WrapWithChiCtx(httptest.NewRequest("GET", "/", nil), nil),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo: &repo.MRepo[float64]{
-				Data: map[string]float64{
-					"Alloc": 1030.0012,
+			name:    "negative test #1",
+			success: false,
+			req:     WrapWithChiCtx(httptest.NewRequest("GET", "/", nil), nil),
+			db: &memory.MemorySt{
+				Counter: &safe.MRepo[mondata.CounterVType]{},
+				Gauge: &safe.MRepo[mondata.GaugeVType]{
+					Data: mondata.GaugeMap{
+						"Alloc": 1030.0012,
+					},
 				},
 			},
 			want: want{
@@ -483,7 +456,7 @@ func TestCreateRootHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			h := CreateRootHandler(tt.gaugeRepo, tt.counterRepo, tt.filePath)
+			h := CreateRootHandler(tt.db, tt.filePath)
 			r := chi.NewRouter()
 			r.Get("/", h)
 
@@ -508,6 +481,7 @@ func TestCreateRootHandler(t *testing.T) {
 	}
 }
 
+// MARK: Value
 func TestCreateValueHandler(t *testing.T) {
 	type want struct {
 		contentType string
@@ -516,12 +490,11 @@ func TestCreateValueHandler(t *testing.T) {
 		value       string
 	}
 	tests := []struct {
-		name        string
-		success     bool
-		req         *http.Request
-		gaugeRepo   *repo.MRepo[float64]
-		counterRepo *repo.MRepo[int64]
-		want        want
+		name    string
+		success bool
+		req     *http.Request
+		db      *memory.MemorySt
+		want    want
 	}{
 		{
 			name:    "positive test #1",
@@ -532,10 +505,12 @@ func TestCreateValueHandler(t *testing.T) {
 					"name": "PollCount",
 				},
 			),
-			gaugeRepo: repo.NewMRepo[float64](),
-			counterRepo: &repo.MRepo[int64]{
-				Data: map[string]int64{
-					"PollCount": 2,
+			db: &memory.MemorySt{
+				Gauge: &safe.MRepo[mondata.GaugeVType]{},
+				Counter: &safe.MRepo[mondata.CounterVType]{
+					Data: mondata.CounterMap{
+						"PollCount": 2,
+					},
 				},
 			},
 			want: want{
@@ -554,10 +529,14 @@ func TestCreateValueHandler(t *testing.T) {
 					"name": "TotalAlloc",
 				},
 			),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo: &repo.MRepo[float64]{
-				Data: map[string]float64{
-					"TotalAlloc": 11.0451,
+			db: &memory.MemorySt{
+				Gauge: &safe.MRepo[mondata.GaugeVType]{
+					Data: mondata.GaugeMap{
+						"TotalAlloc": 11.0451,
+					},
+				},
+				Counter: &safe.MRepo[mondata.CounterVType]{
+					Data: mondata.CounterMap{},
 				},
 			},
 			want: want{
@@ -576,8 +555,7 @@ func TestCreateValueHandler(t *testing.T) {
 					"name": "TotalAlloc",
 				},
 			),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo:   repo.NewMRepo[float64](),
+			db: memory.InitEmpty(),
 			want: want{
 				contentType: "text/plain; charset=utf-8",
 				code:        400,
@@ -594,8 +572,7 @@ func TestCreateValueHandler(t *testing.T) {
 					"name": "TotalAlloc",
 				},
 			),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo:   repo.NewMRepo[float64](),
+			db: memory.InitEmpty(),
 			want: want{
 				contentType: "text/plain; charset=utf-8",
 				code:        404,
@@ -612,8 +589,7 @@ func TestCreateValueHandler(t *testing.T) {
 					"name": "",
 				},
 			),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo:   repo.NewMRepo[float64](),
+			db: memory.InitEmpty(),
 			want: want{
 				contentType: "text/plain; charset=utf-8",
 				code:        404,
@@ -626,7 +602,7 @@ func TestCreateValueHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			h := CreateValueHandler(tt.gaugeRepo, tt.counterRepo)
+			h := CreateValueHandler(tt.db)
 			r := chi.NewRouter()
 			r.Get("/value/{type}/{name}", h)
 			recorder := httptest.NewRecorder()
@@ -659,12 +635,11 @@ func TestCreateValueRootHandler(t *testing.T) {
 		respBody    string
 	}
 	tests := []struct {
-		name        string
-		success     bool
-		req         *http.Request
-		gaugeRepo   *repo.MRepo[float64]
-		counterRepo *repo.MRepo[int64]
-		want        want
+		name    string
+		success bool
+		req     *http.Request
+		db      *memory.MemorySt
+		want    want
 	}{
 		{
 			name:    "positive test #1",
@@ -673,10 +648,12 @@ func TestCreateValueRootHandler(t *testing.T) {
 				httptest.NewRequest("POST", "/value",
 					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"counter"}`))),
 				nil),
-			gaugeRepo: repo.NewMRepo[float64](),
-			counterRepo: &repo.MRepo[int64]{
-				Data: map[string]int64{
-					"PollCount": 64,
+			db: &memory.MemorySt{
+				Gauge: &safe.MRepo[mondata.GaugeVType]{},
+				Counter: &safe.MRepo[mondata.CounterVType]{
+					Data: mondata.CounterMap{
+						"PollCount": 64,
+					},
 				},
 			},
 			want: want{
@@ -693,11 +670,14 @@ func TestCreateValueRootHandler(t *testing.T) {
 				httptest.NewRequest("POST", "/value",
 					bytes.NewBuffer([]byte(`{"id":"Alloc","type":"gauge"}`))),
 				nil),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo: &repo.MRepo[float64]{
-				Data: map[string]float64{
-					"PollCount": 64,
-					"Alloc":     15994.03143,
+			db: &memory.MemorySt{
+				Gauge: &safe.MRepo[mondata.GaugeVType]{
+					Data: mondata.GaugeMap{
+						"Alloc": 15994.03143,
+					},
+				},
+				Counter: &safe.MRepo[mondata.CounterVType]{
+					Data: mondata.CounterMap{},
 				},
 			},
 			want: want{
@@ -708,11 +688,10 @@ func TestCreateValueRootHandler(t *testing.T) {
 			},
 		},
 		{
-			name:        "negative test #1 (method not allowed)",
-			success:     false,
-			req:         WrapWithChiCtx(httptest.NewRequest("GET", "/value", nil), nil),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo:   repo.NewMRepo[float64](),
+			name:    "negative test #1 (method not allowed)",
+			success: false,
+			req:     WrapWithChiCtx(httptest.NewRequest("GET", "/value", nil), nil),
+			db:      memory.InitEmpty(),
 			want: want{
 				contentType: "",
 				code:        405,
@@ -721,11 +700,10 @@ func TestCreateValueRootHandler(t *testing.T) {
 			},
 		},
 		{
-			name:        "negative test #2 (not found)",
-			success:     false,
-			req:         WrapWithChiCtx(httptest.NewRequest("POST", "/valu", nil), nil),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo:   repo.NewMRepo[float64](),
+			name:    "negative test #2 (not found)",
+			success: false,
+			req:     WrapWithChiCtx(httptest.NewRequest("POST", "/valu", nil), nil),
+			db:      memory.InitEmpty(),
 			want: want{
 				contentType: "text/plain; charset=utf-8",
 				code:        404,
@@ -740,8 +718,7 @@ func TestCreateValueRootHandler(t *testing.T) {
 				httptest.NewRequest("POST", "/value",
 					bytes.NewBuffer([]byte(`{"id":"","type":"counter"}`))),
 				nil),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo:   repo.NewMRepo[float64](),
+			db: memory.InitEmpty(),
 			want: want{
 				contentType: "text/plain; charset=utf-8",
 				code:        404,
@@ -756,8 +733,7 @@ func TestCreateValueRootHandler(t *testing.T) {
 				httptest.NewRequest("POST", "/value",
 					bytes.NewBuffer([]byte(`{"id":"PollCoutn","type":"counter"}`))),
 				nil),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo:   repo.NewMRepo[float64](),
+			db: memory.InitEmpty(),
 			want: want{
 				contentType: "text/plain; charset=utf-8",
 				code:        404,
@@ -772,8 +748,7 @@ func TestCreateValueRootHandler(t *testing.T) {
 				httptest.NewRequest("POST", "/value",
 					bytes.NewBuffer([]byte(`{"id":"PollCount","type":"sometype"}`))),
 				nil),
-			counterRepo: repo.NewMRepo[int64](),
-			gaugeRepo:   repo.NewMRepo[float64](),
+			db: memory.InitEmpty(),
 			want: want{
 				contentType: "text/plain; charset=utf-8",
 				code:        400,
@@ -784,7 +759,7 @@ func TestCreateValueRootHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := CreateValueRootHandler(tt.gaugeRepo, tt.counterRepo)
+			h := CreateValueRootHandler(tt.db)
 			r := chi.NewRouter()
 			r.Post("/value", h)
 			recorder := httptest.NewRecorder()

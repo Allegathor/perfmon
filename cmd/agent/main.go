@@ -21,7 +21,7 @@ type flags struct {
 
 var defOpts = &flags{
 	addr:           "http://localhost:8080",
-	reportInterval: 2,
+	reportInterval: 10,
 	pollInterval:   2,
 }
 

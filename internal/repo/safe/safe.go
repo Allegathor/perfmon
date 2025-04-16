@@ -1,15 +1,10 @@
-package repo
+package safe
 
 import (
 	"sync"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
 	"github.com/Allegathor/perfmon/internal/repo/transaction"
-)
-
-type (
-	GaugeMap   = map[string]mondata.GaugeVType
-	CounterMap = map[string]mondata.CounterVType
 )
 
 type MRepo[T mondata.VTypes] struct {
@@ -69,7 +64,7 @@ func NewMRepo[T mondata.VTypes]() *MRepo[T] {
 	}
 }
 
-func (r *MRepo[T]) Begin(writable bool) (transaction.Tx[T], error) {
+func (r *MRepo[T]) Begin(writable bool) (*MRepoTx[T], error) {
 	tx := &MRepoTx[T]{
 		repo:     r,
 		writable: writable,
@@ -79,8 +74,8 @@ func (r *MRepo[T]) Begin(writable bool) (transaction.Tx[T], error) {
 	return tx, nil
 }
 
-func (r *MRepo[T]) managed(writable bool, fn func(transaction.Tx[T]) error) (err error) {
-	tx, err := r.Begin(writable)
+func (r *MRepo[T]) Read(fn func(transaction.TxQry[T]) error) error {
+	tx, err := r.Begin(false)
 	if err != nil {
 		return err
 	}
@@ -89,14 +84,24 @@ func (r *MRepo[T]) managed(writable bool, fn func(transaction.Tx[T]) error) (err
 		tx.Unlock()
 	}()
 
-	err = fn(tx)
+	if err = fn(tx); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (r *MRepo[T]) Read(fn func(transaction.Tx[T]) error) error {
-	return r.managed(false, fn)
-}
+func (r *MRepo[T]) Update(fn func(transaction.TxExec[T]) error) error {
+	tx, err := r.Begin(true)
+	if err != nil {
+		return err
+	}
 
-func (r *MRepo[T]) Update(fn func(transaction.Tx[T]) error) error {
-	return r.managed(true, fn)
+	defer func() {
+		tx.Unlock()
+	}()
+
+	if err = fn(tx); err != nil {
+		return err
+	}
+	return nil
 }

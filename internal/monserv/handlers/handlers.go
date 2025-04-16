@@ -12,9 +12,7 @@ import (
 	"strings"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
-	"github.com/Allegathor/perfmon/internal/repo/transaction"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -48,7 +46,29 @@ func (re *RespError) Msg() string {
 	return re.msg
 }
 
-func CreateRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo, path string) http.HandlerFunc {
+type Getters interface {
+	GetGauge(ctx context.Context, name string) (mondata.GaugeVType, bool, error)
+	GetGaugeAll(ctx context.Context) (mondata.GaugeMap, error)
+
+	GetCounter(ctx context.Context, name string) (mondata.CounterVType, bool, error)
+	GetCounterAll(ctx context.Context) (mondata.CounterMap, error)
+}
+
+type Setters interface {
+	SetGauge(ctx context.Context, name string, value mondata.GaugeVType) error
+	SetGaugeAll(ctx context.Context, gaugeMap mondata.GaugeMap) error
+
+	SetCounter(ctx context.Context, name string, value mondata.CounterVType) error
+	SetCounterAll(ctx context.Context, gaugeMap mondata.CounterMap) error
+}
+
+type MDB interface {
+	Getters
+	Setters
+	Ping(ctx context.Context) error
+}
+
+func CreateRootHandler(db MDB, path string) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		type Vals interface {
 			map[string]float64 | map[string]int64
@@ -59,23 +79,17 @@ func CreateRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo, pat
 			Content T
 		}
 
-		gch := make(chan map[string]float64)
-		cch := make(chan map[string]int64)
+		gVals, err := db.GetGaugeAll(req.Context())
+		if err != nil {
+			http.Error(rw, "error in acquaring gauge values from db", http.StatusInternalServerError)
+			return
+		}
 
-		go gr.Read(func(tx transaction.Tx[float64]) error {
-			gch <- tx.GetAll()
-			return nil
-		})
-
-		go cr.Read(func(tx transaction.Tx[int64]) error {
-			cch <- tx.GetAll()
-			tx.GetAll()
-
-			return nil
-		})
-
-		gVals := <-gch
-		cVals := <-cch
+		cVals, err := db.GetCounterAll(req.Context())
+		if err != nil {
+			http.Error(rw, "error in acquaring counter values from db", http.StatusInternalServerError)
+			return
+		}
 
 		viewData := []any{
 			Table[map[string]float64]{Name: "Gauge", Content: gVals},
@@ -101,7 +115,7 @@ func CreateRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo, pat
 	}
 }
 
-func updateMetrics(m *mondata.Metrics, gr transaction.GaugeRepo, cr transaction.CounterRepo) (int, *RespError) {
+func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespError) {
 	if m.ID == "" {
 		return http.StatusNotFound, NewRespError("name must contain a value", nil)
 	}
@@ -115,10 +129,10 @@ func updateMetrics(m *mondata.Metrics, gr transaction.GaugeRepo, cr transaction.
 			m.Value = &v
 		}
 
-		go gr.Update(func(tx transaction.Tx[float64]) error {
-			tx.Set(m.ID, *m.Value)
-			return nil
-		})
+		err := db.SetGauge(ctx, m.ID, *m.Value)
+		if err != nil {
+			return http.StatusInternalServerError, NewRespError("setting gauge value to db failed", nil)
+		}
 
 		return http.StatusOK, nil
 
@@ -131,10 +145,10 @@ func updateMetrics(m *mondata.Metrics, gr transaction.GaugeRepo, cr transaction.
 			m.Delta = &d
 		}
 
-		go cr.Update(func(tx transaction.Tx[int64]) error {
-			tx.SetAccum(m.ID, *m.Delta)
-			return nil
-		})
+		err := db.SetCounter(ctx, m.ID, *m.Delta)
+		if err != nil {
+			return http.StatusInternalServerError, NewRespError("setting counter value to db failed", nil)
+		}
 		return http.StatusOK, nil
 
 	}
@@ -142,14 +156,14 @@ func updateMetrics(m *mondata.Metrics, gr transaction.GaugeRepo, cr transaction.
 	return http.StatusBadRequest, NewRespError("incorrect request type", nil)
 }
 
-func CreateUpdateHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo) http.HandlerFunc {
+func CreateUpdateHandler(db MDB) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		var m = &mondata.Metrics{}
 
 		m.MType = chi.URLParam(req, URLPathType)
 		m.ID = chi.URLParam(req, URLPathName)
 		m.SValue = chi.URLParam(req, URLPathValue)
-		code, err := updateMetrics(m, gr, cr)
+		code, err := updateMetrics(req.Context(), m, db)
 		if err != nil {
 			http.Error(rw, err.Msg(), code)
 			return
@@ -159,7 +173,7 @@ func CreateUpdateHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo) h
 	}
 }
 
-func CreateUpdateRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo) http.HandlerFunc {
+func CreateUpdateRootHandler(db MDB) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
 			var buf bytes.Buffer
@@ -176,7 +190,7 @@ func CreateUpdateRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRep
 				return
 			}
 
-			code, respErr := updateMetrics(m, gr, cr)
+			code, respErr := updateMetrics(req.Context(), m, db)
 			if respErr != nil {
 				http.Error(rw, respErr.Msg(), code)
 				return
@@ -194,28 +208,16 @@ type vhData struct {
 	code    int
 }
 
-func getVhData(m *mondata.Metrics, gr transaction.GaugeRepo, cr transaction.CounterRepo) (*vhData, *RespError) {
+func getVhData(ctx context.Context, m *mondata.Metrics, db MDB) (*vhData, *RespError) {
 	if m.ID == "" {
 		return &vhData{code: http.StatusNotFound}, NewRespError("name must contain a value", nil)
 	}
 
 	if m.MType == mondata.GaugeType {
-		var (
-			v      float64
-			ok     bool
-			ch     = make(chan float64)
-			chbool = make(chan bool)
-		)
-
-		go gr.Read(func(tx transaction.Tx[float64]) error {
-			value, found := tx.Get(m.ID)
-			ch <- value
-			chbool <- found
-			return nil
-		})
-
-		v, ok = <-ch, <-chbool
-		if ok {
+		v, ok, err := db.GetGauge(ctx, m.ID)
+		if err != nil {
+			return &vhData{code: http.StatusInternalServerError}, NewRespError("getting gauge value from db failed", nil)
+		} else if ok {
 			return &vhData{
 				code: http.StatusOK,
 				metrics: &mondata.Metrics{
@@ -226,22 +228,10 @@ func getVhData(m *mondata.Metrics, gr transaction.GaugeRepo, cr transaction.Coun
 		fmt.Printf("value[%s] with type %s doesn't exist in the storage\n", m.MType, m.ID)
 		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in the storage", nil)
 	} else if m.MType == mondata.CounterType {
-		var (
-			v      int64
-			ok     bool
-			ch     = make(chan int64)
-			chbool = make(chan bool)
-		)
-
-		go cr.Read(func(tx transaction.Tx[int64]) error {
-			value, found := tx.Get(m.ID)
-			ch <- value
-			chbool <- found
-			return nil
-		})
-
-		v, ok = <-ch, <-chbool
-		if ok {
+		v, ok, err := db.GetCounter(ctx, m.ID)
+		if err != nil {
+			return &vhData{code: http.StatusInternalServerError}, NewRespError("getting counter value from db failed", nil)
+		} else if ok {
 			return &vhData{
 				code: http.StatusOK,
 				metrics: &mondata.Metrics{
@@ -256,12 +246,12 @@ func getVhData(m *mondata.Metrics, gr transaction.GaugeRepo, cr transaction.Coun
 	return &vhData{code: http.StatusBadRequest}, NewRespError("incorrect request type", nil)
 }
 
-func CreateValueHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo) http.HandlerFunc {
+func CreateValueHandler(db MDB) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		m := &mondata.Metrics{}
 		m.MType = chi.URLParam(req, URLPathType)
 		m.ID = chi.URLParam(req, URLPathName)
-		vhd, respErr := getVhData(m, gr, cr)
+		vhd, respErr := getVhData(req.Context(), m, db)
 		if respErr != nil {
 			http.Error(rw, respErr.Msg(), vhd.code)
 			return
@@ -274,7 +264,7 @@ func CreateValueHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo) ht
 	}
 }
 
-func CreateValueRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo) http.HandlerFunc {
+func CreateValueRootHandler(db MDB) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
 		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
 			var buf bytes.Buffer
@@ -290,7 +280,7 @@ func CreateValueRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo
 				return
 			}
 
-			vhd, respErr := getVhData(m, gr, cr)
+			vhd, respErr := getVhData(req.Context(), m, db)
 			if respErr != nil {
 				http.Error(rw, respErr.Msg(), vhd.code)
 				return
@@ -314,11 +304,11 @@ func CreateValueRootHandler(gr transaction.GaugeRepo, cr transaction.CounterRepo
 	}
 }
 
-func CreatePingHandler(db *pgx.Conn) http.HandlerFunc {
+func CreatePingHandler(db MDB) http.HandlerFunc {
 	return func(rw http.ResponseWriter, req *http.Request) {
-		err := db.Ping(context.Background())
+		err := db.Ping(req.Context())
 		if err != nil {
-			http.Error(rw, "connection to db fail", http.StatusInternalServerError)
+			http.Error(rw, "connection to db wasn't established", http.StatusInternalServerError)
 		}
 
 		rw.WriteHeader(http.StatusOK)
