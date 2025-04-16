@@ -108,6 +108,7 @@ func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
 		)
 	}
 
+	b.Logger.Info("restoring from backup success")
 	return nil
 }
 
