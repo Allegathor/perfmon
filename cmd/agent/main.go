@@ -39,6 +39,7 @@ func setAddr(value string, defaultValue string) string {
 	return value
 }
 
+var sp = os.Getenv("FILE_STORAGE_PATH")
 var opts flags
 
 func init() {
@@ -85,7 +86,11 @@ func main() {
 	cl := collector.New(opts.pollInterval)
 
 	go cl.Monitor()
-	go client.PollStats(cl)
+	if sp != "" {
+		go client.PollStats(cl)
+	} else {
+		go client.PollStatsBatch(cl)
+	}
 
 	runtime.Goexit()
 }

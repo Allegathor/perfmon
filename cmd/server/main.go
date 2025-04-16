@@ -29,7 +29,7 @@ var srvOpts flags
 
 var defSrvOpts = &flags{
 	addr:          "localhost:8080",
-	dbConnStr:     "postgres://postgres_user:postgres_pa33word@localhost:5432/postgres_db",
+	dbConnStr:     "",
 	mode:          "dev",
 	path:          "./backup.json",
 	storeInterval: 300,
@@ -41,7 +41,7 @@ func init() {
 	opts.SetStr("DATABASE_DSN", "d", &srvOpts.dbConnStr, defSrvOpts.dbConnStr, "URL for DB connection")
 	opts.SetStr("MODE", "m", &srvOpts.mode, defSrvOpts.mode, "mode of running the server: dev or prod")
 	opts.SetStr("FILE_STORAGE_PATH", "f", &srvOpts.path, defSrvOpts.path, "path to backup file")
-	opts.SetInt("STORE_INTERVAL", "s", &srvOpts.storeInterval, defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
+	opts.SetInt("STORE_INTERVAL", "i", &srvOpts.storeInterval, defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
 	opts.SetBool("RESTORE", "r", &srvOpts.restore, defSrvOpts.restore, "whether to restore from backup file on startup")
 }
 
@@ -99,6 +99,7 @@ func main() {
 	}
 
 	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp)
+	db.Restore()
 
 	s := monserv.NewInstance(srvOpts.addr, db, logger)
 	s.MountHandlers()
@@ -108,8 +109,11 @@ func main() {
 		return s.ListenAndServe()
 	})
 	g.Go(func() error {
+		return db.ScheduleBackup(gCtx)
+	})
+	g.Go(func() error {
 		<-gCtx.Done()
-		db.Dump()
+		db.Close()
 		return s.Shutdown(context.Background())
 	})
 

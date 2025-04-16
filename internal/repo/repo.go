@@ -29,21 +29,19 @@ type MetricsRepo interface {
 	MetricsGetters
 	MetricsSetters
 	Ping(ctx context.Context) error
+	Close()
 }
 
 type backupWriter interface {
 	RestorePrev(MetricsRepo) error
 	ShouldRestore() bool
-	Write(MetricsRepo) error
+	Schedule(context.Context, MetricsRepo) error
 }
 
 type Current struct {
 	MetricsRepo
-	bkp backupWriter
-}
-
-func (c *Current) Dump() {
-	c.bkp.Write(c.MetricsRepo)
+	bkp        backupWriter
+	isInMemory bool
 }
 
 func Init(ctx context.Context, connStr string, bkp backupWriter) *Current {
@@ -52,14 +50,27 @@ func Init(ctx context.Context, connStr string, bkp backupWriter) *Current {
 		if pg, err := pgsql.Init(ctx, connStr); err != nil {
 			fmt.Println(err.Error())
 		} else {
-			return &Current{MetricsRepo: pg}
+			return &Current{MetricsRepo: pg, bkp: bkp, isInMemory: false}
 		}
 	}
 
 	ms, _ := memory.Init(ctx)
-	if bkp.ShouldRestore() {
-		bkp.RestorePrev(ms)
+
+	return &Current{MetricsRepo: ms, bkp: bkp, isInMemory: true}
+}
+
+func (c *Current) Restore() error {
+	if c.bkp.ShouldRestore() {
+		return c.bkp.RestorePrev(c.MetricsRepo)
 	}
 
-	return &Current{MetricsRepo: ms, bkp: bkp}
+	return nil
+}
+
+func (c *Current) ScheduleBackup(ctx context.Context) error {
+	if c.isInMemory {
+		return c.bkp.Schedule(ctx, c.MetricsRepo)
+	}
+
+	return nil
 }

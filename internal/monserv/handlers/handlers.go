@@ -203,6 +203,66 @@ func CreateUpdateRootHandler(db MDB) http.HandlerFunc {
 	}
 }
 
+func CreateUpdateBatchHandler(db MDB) http.HandlerFunc {
+	return func(rw http.ResponseWriter, req *http.Request) {
+		if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
+			var buf bytes.Buffer
+
+			_, err := buf.ReadFrom(req.Body)
+			if err != nil {
+				http.Error(rw, "reading body failed", http.StatusBadRequest)
+				return
+			}
+
+			mm := &[]mondata.Metrics{}
+			if err := json.Unmarshal(buf.Bytes(), mm); err != nil {
+				http.Error(rw, "unmarshaling failed", http.StatusBadRequest)
+				return
+			}
+
+			gm := make(map[string]float64)
+			cm := make(map[string]int64)
+
+			for _, rec := range *mm {
+				if rec.ID == "" {
+					continue
+				}
+
+				if rec.MType == mondata.GaugeType {
+					gm[rec.ID] = *rec.Value
+
+				} else if rec.MType == mondata.CounterType {
+					cm[rec.ID] = *rec.Delta
+				}
+			}
+
+			if len(gm) == 0 && len(cm) == 0 {
+				http.Error(rw, "nothing to update", http.StatusBadRequest)
+				return
+			}
+
+			if len(gm) > 0 {
+				if err := db.SetGaugeAll(req.Context(), gm); err != nil {
+					http.Error(rw, "gauge batch to db failed", http.StatusInternalServerError)
+					return
+				}
+			}
+
+			if len(cm) > 0 {
+				if err := db.SetCounterAll(req.Context(), cm); err != nil {
+					http.Error(rw, "counter batch to db failed", http.StatusInternalServerError)
+					return
+				}
+			}
+
+			rw.WriteHeader(http.StatusOK)
+
+		} else {
+			http.Error(rw, "unsupported content type", http.StatusBadRequest)
+		}
+	}
+}
+
 type vhData struct {
 	metrics *mondata.Metrics
 	code    int

@@ -29,12 +29,12 @@ type PgSQL struct {
 }
 
 func Init(ctx context.Context, connStr string) (*PgSQL, error) {
-	conn, err := pgxpool.New(ctx, connStr)
+	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
 		return nil, err
 	}
 
-	tx, err := conn.Begin(ctx)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,11 @@ func Init(ctx context.Context, connStr string) (*PgSQL, error) {
 		return nil, err
 	}
 
-	return &PgSQL{Pool: conn}, nil
+	return &PgSQL{Pool: pool}, nil
+}
+
+func (pg *PgSQL) Close() {
+	pg.Pool.Close()
 }
 
 // MARK: gauge metrics
@@ -156,13 +160,8 @@ func (pg *PgSQL) SetGaugeAll(ctx context.Context, metrics mondata.GaugeMap) erro
 	}
 	defer tx.Rollback(ctx)
 
-	_, err = tx.Prepare(ctx, "set_g_all", upsertGaugeQry)
-	if err != nil {
-		return err
-	}
-
 	for k, v := range metrics {
-		_, err = tx.Exec(ctx, "set_g_all", pgx.NamedArgs{"name": k, "value": v})
+		_, err = tx.Exec(ctx, upsertGaugeQry, pgx.NamedArgs{"name": k, "value": v})
 		if err != nil {
 			return err
 		}
@@ -269,13 +268,8 @@ func (pg *PgSQL) SetCounterAll(ctx context.Context, metrics mondata.CounterMap) 
 	}
 	defer tx.Rollback(ctx)
 
-	_, err = tx.Prepare(ctx, "set_c_all", upsertCounterQry)
-	if err != nil {
-		return err
-	}
-
 	for k, v := range metrics {
-		_, err = tx.Exec(ctx, "set_c_all", pgx.NamedArgs{"name": k, "value": v})
+		_, err = tx.Exec(ctx, upsertCounterQry, pgx.NamedArgs{"name": k, "value": v})
 		if err != nil {
 			return err
 		}

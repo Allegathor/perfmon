@@ -28,11 +28,15 @@ func InitEmpty() *MemorySt {
 	}
 }
 
+func (ms *MemorySt) Close() {
+	// mock
+}
+
 // MARK: gauge metrics
 func (ms *MemorySt) GetGauge(ctx context.Context, name string) (mondata.GaugeVType, bool, error) {
 	var (
 		v  mondata.GaugeVType
-		ok bool
+		ok = false
 	)
 
 	ms.Gauge.Read(func(tx transaction.TxQry[mondata.GaugeVType]) error {
@@ -76,7 +80,7 @@ func (ms *MemorySt) SetGaugeAll(ctx context.Context, metrics mondata.GaugeMap) e
 func (ms *MemorySt) GetCounter(ctx context.Context, name string) (mondata.CounterVType, bool, error) {
 	var (
 		v  mondata.CounterVType
-		ok bool
+		ok = false
 	)
 
 	ms.Counter.Read(func(tx transaction.TxQry[mondata.CounterVType]) error {
@@ -105,7 +109,7 @@ func (ms *MemorySt) SetCounter(ctx context.Context, name string, value mondata.C
 
 func (ms *MemorySt) SetCounterAll(ctx context.Context, values map[string]mondata.CounterVType) error {
 	ms.Counter.Update(func(tx transaction.TxExec[mondata.CounterVType]) error {
-		tx.SetAll(values)
+		tx.SetAccumAll(values)
 		return nil
 	})
 	return nil

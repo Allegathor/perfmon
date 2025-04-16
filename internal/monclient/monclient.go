@@ -11,9 +11,13 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
+const (
+	updatePath      = "/update"
+	updateBatchPath = "/updates"
+)
+
 type MonClient struct {
 	addr           string
-	updatePath     string
 	reportInterval uint
 	Client         *resty.Client
 }
@@ -26,7 +30,6 @@ func NewInstance(addr string, interval uint) *MonClient {
 
 	m := &MonClient{
 		addr:           addr,
-		updatePath:     "/update",
 		reportInterval: interval,
 		Client:         c,
 	}
@@ -51,21 +54,51 @@ func buildReqBody(name string, mtype string, g *float64, c *int64) []byte {
 	return j
 }
 
-func (m *MonClient) Post(p []byte) {
-	var buf bytes.Buffer
-	zb := gzip.NewWriter(&buf)
-	_, err := zb.Write(p)
+func buildReqBatchBody(gm map[string]float64, cm map[string]int64) []byte {
+	mbatch := make([]mondata.Metrics, 0)
+
+	if len(gm) == 0 && len(cm) == 0 {
+		return make([]byte, 0)
+	}
+
+	for k, v := range gm {
+		mbatch = append(mbatch, mondata.Metrics{
+			ID:    k,
+			MType: "gauge",
+			Value: &v,
+		})
+	}
+
+	for k, d := range cm {
+		mbatch = append(mbatch, mondata.Metrics{
+			ID:    k,
+			MType: "counter",
+			Delta: &d,
+		})
+	}
+
+	j, err := json.Marshal(mbatch)
 	if err != nil {
 		panic(err)
 	}
-	zb.Close()
+	return j
+}
+
+func (m *MonClient) Post(p []byte, path string) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, err := zw.Write(p)
+	if err != nil {
+		panic(err)
+	}
+	zw.Close()
 
 	resp, err := m.Client.R().
 		SetHeader("Accept-Encoding", "gzip").
 		SetHeader("Content-Encoding", "gzip").
 		SetHeader("Content-Type", "application/json; charset=utf-8").
 		SetBody(&buf).
-		Post(m.addr + m.updatePath)
+		Post(m.addr + path)
 
 	if err != nil {
 		panic(err)
@@ -86,7 +119,7 @@ func (m *MonClient) PollStats(cl *collector.Collector) {
 			})
 			for k, v := range data {
 				b := buildReqBody(k, mondata.GaugeType, &v, nil)
-				m.Post(b)
+				m.Post(b, updatePath)
 			}
 		}()
 
@@ -99,9 +132,38 @@ func (m *MonClient) PollStats(cl *collector.Collector) {
 			})
 			for k, v := range data {
 				b := buildReqBody(k, mondata.CounterType, nil, &v)
-				m.Post(b)
+				m.Post(b, updatePath)
 			}
 		}()
 	}
 
+}
+
+func (m *MonClient) PollStatsBatch(cl *collector.Collector) {
+	for {
+		time.Sleep(time.Duration(m.reportInterval) * time.Second)
+		go func() {
+			var (
+				gm map[string]float64
+				cm map[string]int64
+			)
+
+			cl.Repo.Gauge.Read(func(tx *collector.MtcsTx[float64]) error {
+				gm = tx.GetAll()
+
+				return nil
+			})
+
+			cl.Repo.Counter.Read(func(tx *collector.MtcsTx[int64]) error {
+				cm = tx.GetAll()
+
+				return nil
+			})
+
+			b := buildReqBatchBody(gm, cm)
+			if len(b) > 0 {
+				m.Post(b, updateBatchPath)
+			}
+		}()
+	}
 }

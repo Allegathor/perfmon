@@ -16,8 +16,9 @@ type TxQry[T mondata.VTypes] interface {
 type TxExec[T mondata.VTypes] interface {
 	Tx[T]
 	Set(name string, v T)
-	SetAccum(name string, v T)
 	SetAll(map[string]T)
+	SetAccum(name string, v T)
+	SetAccumAll(map[string]T)
 }
 
 type GaugeRepo interface {
