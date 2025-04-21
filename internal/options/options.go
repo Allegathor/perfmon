@@ -8,7 +8,6 @@ import (
 
 func SetEnvStr(p *string, envName string) {
 	v := os.Getenv(envName)
-	fmt.Println(v)
 	if v != "" {
 		*p = v
 	}
