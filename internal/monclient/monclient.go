@@ -179,31 +179,56 @@ func (m *MonClient) PollStats(cl *collector.Collector) {
 
 }
 
-func (m *MonClient) PollStatsBatch(cl *collector.Collector) {
+type Report struct {
+	gm map[string]float64
+	cm map[string]int64
+	id int64
+}
+
+func (m *MonClient) PollWorker(reps <-chan *Report, out chan<- int64) {
+	for r := range reps {
+		b := buildReqBatchBody(r.gm, r.cm)
+		if len(b) > 0 {
+			m.Post(b, updateBatchPath)
+		}
+		out <- r.id
+	}
+}
+
+func (m *MonClient) PollStatsBatch(cl *collector.Collector, chCap uint) {
+	var id int64
+	repsCh := make(chan *Report, chCap)
+	reqCh := make(chan int64)
+
+	ticker := time.NewTicker(time.Duration(m.reportInterval) * time.Second)
 	for {
-		time.Sleep(time.Duration(m.reportInterval) * time.Second)
-		go func() {
-			var (
-				gm map[string]float64
-				cm map[string]int64
-			)
+		select {
+		case <-ticker.C:
+			go func() {
+				var (
+					gm map[string]float64
+					cm map[string]int64
+				)
 
-			cl.Repo.Gauge.Read(func(tx *collector.MtcsTx[float64]) error {
-				gm = tx.GetAll()
+				cl.Repo.Gauge.Read(func(tx *collector.MtcsTx[float64]) error {
+					gm = tx.GetAll()
 
-				return nil
-			})
+					return nil
+				})
 
-			cl.Repo.Counter.Read(func(tx *collector.MtcsTx[int64]) error {
-				cm = tx.GetAll()
+				cl.Repo.Counter.Read(func(tx *collector.MtcsTx[int64]) error {
+					cm = tx.GetAll()
 
-				return nil
-			})
+					return nil
+				})
 
-			b := buildReqBatchBody(gm, cm)
-			if len(b) > 0 {
-				m.Post(b, updateBatchPath)
-			}
-		}()
+				repsCh <- &Report{gm, cm, id}
+
+				go m.PollWorker(repsCh, reqCh)
+				id++
+			}()
+		case <-reqCh:
+			// TODO
+		}
 	}
 }

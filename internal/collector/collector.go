@@ -1,12 +1,15 @@
 package collector
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 type MtcsTx[T mondata.VTypes] struct {
@@ -87,10 +90,12 @@ type Repo struct {
 
 type Collector struct {
 	Repo         *Repo
+	cpuCores     int
 	pollInterval uint
 }
 
 func New(pollInterval uint) *Collector {
+	count, _ := cpu.Counts(false)
 	g := &Mtcs[float64]{
 		Data: make(map[string]float64),
 	}
@@ -104,11 +109,27 @@ func New(pollInterval uint) *Collector {
 			Gauge:   g,
 			Counter: c,
 		},
+		cpuCores:     count,
 		pollInterval: pollInterval,
 	}
 }
 
-func (c *Collector) GaugeStats() {
+func (c *Collector) GopsStats() {
+	v, _ := mem.VirtualMemory()
+	coresUt, _ := cpu.Percent(0, true)
+	c.Repo.Gauge.Update(func(tx *MtcsTx[float64]) error {
+		tx.Set("TotalMemory", float64(v.Total))
+		tx.Set("FreeMemory", float64(v.Free))
+		for i := range c.cpuCores {
+			v := coresUt[i]
+			tx.Set(fmt.Sprintf("CPUutilization%d", i+1), v)
+		}
+
+		return nil
+	})
+}
+
+func (c *Collector) RuntimeStats() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
@@ -163,7 +184,8 @@ func (c *Collector) UpdateCounters() {
 }
 
 func (c *Collector) Stats() {
-	go c.GaugeStats()
+	go c.GopsStats()
+	go c.RuntimeStats()
 	go c.UpdateCounters()
 }
 
