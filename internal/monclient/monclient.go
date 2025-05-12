@@ -185,20 +185,25 @@ type Report struct {
 	id int64
 }
 
-func (m *MonClient) PollWorker(reps <-chan *Report, out chan<- int64) {
+func (m *MonClient) PollWorker(idx uint, reps <-chan *Report, out chan<- int64) {
 	for r := range reps {
 		b := buildReqBatchBody(r.gm, r.cm)
 		if len(b) > 0 {
 			m.Post(b, updateBatchPath)
 		}
+		fmt.Printf("worker %d complete job N%d\n", idx, r.id)
 		out <- r.id
 	}
 }
 
-func (m *MonClient) PollStatsBatch(cl *collector.Collector, chCap uint) {
+func (m *MonClient) PollStatsBatch(cl *collector.Collector, wpoolCount uint, chCap uint) {
 	var id int64
 	repsCh := make(chan *Report, chCap)
 	reqCh := make(chan int64)
+
+	for i := range wpoolCount {
+		go m.PollWorker(i, repsCh, reqCh)
+	}
 
 	ticker := time.NewTicker(time.Duration(m.reportInterval) * time.Second)
 	for {
@@ -224,7 +229,6 @@ func (m *MonClient) PollStatsBatch(cl *collector.Collector, chCap uint) {
 
 				repsCh <- &Report{gm, cm, id}
 
-				go m.PollWorker(repsCh, reqCh)
 				id++
 			}()
 		case <-reqCh:

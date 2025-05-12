@@ -24,7 +24,7 @@ type flags struct {
 var defOpts = &flags{
 	addr:           "http://localhost:8080",
 	key:            "",
-	rateLimit:      1,
+	rateLimit:      3,
 	reportInterval: 10,
 	pollInterval:   2,
 }
@@ -80,7 +80,7 @@ func main() {
 	cl := collector.New(agOpts.pollInterval)
 
 	go cl.Monitor()
-	go client.PollStatsBatch(cl, agOpts.rateLimit)
+	go client.PollStatsBatch(cl, agOpts.rateLimit, 9)
 
 	runtime.Goexit()
 }
