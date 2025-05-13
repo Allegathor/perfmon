@@ -1,7 +1,13 @@
 package middlewares
 
 import (
+	"bytes"
 	"compress/gzip"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"strings"
@@ -140,24 +146,6 @@ func (gw *gzipWriter) Close() error {
 func CreateCompress(l *zap.SugaredLogger) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-			if strings.Contains(req.Header.Get("Content-Encoding"), "gzip") {
-				gr, err := NewGzipReader(req.Body)
-				if err != nil {
-					l.Errorf("error creating reader in compress middleware: %s", err)
-					http.Error(rw, "decompression failed", http.StatusInternalServerError)
-					return
-				}
-
-				req.Body = gr
-				defer func() {
-					if closeErr := gr.Close(); closeErr != nil {
-						l.Errorf("error closing reader in compress middleware: %s", closeErr)
-						http.Error(rw, "decompression failed", http.StatusInternalServerError)
-						return
-					}
-				}()
-			}
-
 			if !strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") {
 				next.ServeHTTP(rw, req)
 				return
@@ -173,6 +161,92 @@ func CreateCompress(l *zap.SugaredLogger) func(next http.Handler) http.Handler {
 			}()
 
 			next.ServeHTTP(gw, req)
+		})
+	}
+}
+
+func CreateUncompressReq(l *zap.SugaredLogger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			if strings.Contains(req.Header.Get("Content-Encoding"), "gzip") {
+				gr, err := NewGzipReader(req.Body)
+				if err != nil {
+					l.Errorf("error creating reader in uncompress middleware: %s", err)
+					http.Error(rw, "decompression failed", http.StatusInternalServerError)
+					return
+				}
+
+				req.Body = gr
+			}
+
+			next.ServeHTTP(rw, req)
+		})
+	}
+}
+
+type SignWriter struct {
+	http.ResponseWriter
+	h hash.Hash
+}
+
+func NewSignWriter(rw http.ResponseWriter, key string) *SignWriter {
+	return &SignWriter{
+		ResponseWriter: rw,
+		h:              hmac.New(sha256.New, []byte(key)),
+	}
+}
+
+func (sw *SignWriter) Write(p []byte) (int, error) {
+	if sw.h != nil {
+		sw.Write(p)
+		signStr := base64.URLEncoding.EncodeToString(sw.h.Sum(nil))
+		sw.ResponseWriter.Header().Set("HashSHA256", signStr)
+	}
+
+	return sw.ResponseWriter.Write(p)
+}
+
+func CreateSumChecker(key string, l *zap.SugaredLogger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			hashHeader := req.Header.Get("HashSHA256")
+			if hashHeader == "" {
+				l.Warnln("HashSHA256 header is missed")
+				next.ServeHTTP(rw, req)
+				return
+			}
+
+			reqSign, err := base64.URLEncoding.DecodeString(hashHeader)
+			if err != nil {
+				l.Errorf("error encoding hash string: %s", err)
+				http.Error(rw, "encoding error", http.StatusInternalServerError)
+				return
+			}
+
+			var bodyBuf bytes.Buffer
+			req.Body = io.NopCloser(io.TeeReader(req.Body, &bodyBuf))
+
+			h := hmac.New(sha256.New, []byte(key))
+			io.Copy(h, req.Body)
+			sign := h.Sum(nil)
+			fmt.Println(len(bodyBuf.Bytes()))
+
+			if hmac.Equal(reqSign, sign) {
+				req.Body = io.NopCloser(&bodyBuf)
+				next.ServeHTTP(rw, req)
+			} else {
+				l.Errorln("signs are not equal")
+				http.Error(rw, "invalid request", http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func CreateSigner(key string, l *zap.SugaredLogger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			sw := NewSignWriter(rw, key)
+			next.ServeHTTP(sw, req)
 		})
 	}
 }
