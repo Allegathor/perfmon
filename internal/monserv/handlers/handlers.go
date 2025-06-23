@@ -89,6 +89,14 @@ func (api *API) Error(rw http.ResponseWriter, err *RespError, code int) {
 }
 
 func (api *API) CreateRootHandler(path string) http.HandlerFunc {
+
+	if path == "" {
+		dir, _ := os.Getwd()
+		path = dir + "/templates/index.html"
+	}
+
+	tmpl, tmplErr := template.New("index.html").ParseFiles(path)
+
 	return func(rw http.ResponseWriter, req *http.Request) {
 		type Vals interface {
 			map[string]float64 | map[string]int64
@@ -118,20 +126,14 @@ func (api *API) CreateRootHandler(path string) http.HandlerFunc {
 			Table[map[string]int64]{Name: "Counter", Content: cVals},
 		}
 
-		if path == "" {
-			dir, _ := os.Getwd()
-			path = dir + "/templates/index.html"
-		}
-
-		t, err := template.New("index.html").ParseFiles(path)
-		if err != nil {
+		if tmplErr != nil {
 			respErr := NewRespError("file parsing error", err)
 			api.Error(rw, respErr, http.StatusInternalServerError)
 			return
 		}
 
 		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
-		err = t.Execute(rw, viewData)
+		err = tmpl.Execute(rw, viewData)
 		if err != nil {
 			respErr := NewRespError("template execution error", err)
 			api.Error(rw, respErr, http.StatusInternalServerError)
