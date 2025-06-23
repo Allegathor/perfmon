@@ -76,7 +76,7 @@ func initLogger(mode string) *zap.Logger {
 			zapcore.NewCore(fileEncoder, sync, zapcore.InfoLevel),
 		)
 	} else {
-		std := zapcore.AddSync(os.Stdout)
+		std :=   zapcore.AddSync(os.Stdout)
 
 		devcfg := zap.NewDevelopmentEncoderConfig()
 		devcfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
