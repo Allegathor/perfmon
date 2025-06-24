@@ -18,7 +18,7 @@ import (
 )
 
 // MARK: Update
-func TestUpdateHandler(t *testing.T) {
+func TestAPI_UpdateHandler(t *testing.T) {
 	type want[T int64 | float64] struct {
 		contentType string
 		code        int
@@ -204,7 +204,7 @@ func TestUpdateHandler(t *testing.T) {
 
 // MARK: Update root
 
-func TestUpdateRootHandler(t *testing.T) {
+func TestAPI_UpdateRootHandler(t *testing.T) {
 	type want[T int64 | float64] struct {
 		contentType string
 		code        int
@@ -364,7 +364,7 @@ func TestUpdateRootHandler(t *testing.T) {
 }
 
 // MARK: Root
-func TestCreateRootHandler(t *testing.T) {
+func TestAPI_CreateRootHandler(t *testing.T) {
 	dir, _ := os.Getwd()
 	type want struct {
 		contentType string
@@ -469,7 +469,7 @@ func TestCreateRootHandler(t *testing.T) {
 }
 
 // MARK: Value
-func TestValueHandler(t *testing.T) {
+func TestAPI_ValueHandler(t *testing.T) {
 	type want struct {
 		contentType string
 		code        int
@@ -613,7 +613,7 @@ func TestValueHandler(t *testing.T) {
 	}
 }
 
-func TestValueRootHandler(t *testing.T) {
+func TestAPI_ValueRootHandler(t *testing.T) {
 	type want struct {
 		contentType string
 		code        int

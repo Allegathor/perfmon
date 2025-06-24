@@ -14,7 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func ExampleUpdateHandler() {
+func ExampleAPI_UpdateHandler() {
 	db := memory.InitEmpty()
 	req := WrapWithChiCtx(
 		httptest.NewRequest("POST", "/update/counter/PollCount/1", nil), map[string]string{
@@ -31,6 +31,7 @@ func ExampleUpdateHandler() {
 	r.ServeHTTP(recorder, req)
 
 	res := recorder.Result()
+	defer res.Body.Close()
 	out1 := res.StatusCode
 	fmt.Println(out1)
 	out2, _, _ := db.GetCounter(context.TODO(), "PollCount")
@@ -41,7 +42,7 @@ func ExampleUpdateHandler() {
 	// 1
 }
 
-func ExampleUpdateRootHandler() {
+func ExampleAPI_UpdateRootHandler() {
 	db := memory.InitEmpty()
 
 	req := WrapWithChiCtx(
@@ -56,6 +57,7 @@ func ExampleUpdateRootHandler() {
 	r.ServeHTTP(recorder, req)
 
 	res := recorder.Result()
+	defer res.Body.Close()
 	out1 := res.StatusCode
 	fmt.Println(out1)
 	out2, _, _ := db.GetCounter(context.TODO(), "PollCount")
@@ -66,7 +68,7 @@ func ExampleUpdateRootHandler() {
 	// 99
 }
 
-func ExampleCreateRootHandler() {
+func ExampleAPI_CreateRootHandler() {
 	dir, _ := os.Getwd()
 	filePath := dir + "/../../../templates/index.html"
 
@@ -81,6 +83,7 @@ func ExampleCreateRootHandler() {
 	r.ServeHTTP(recorder, req)
 
 	res := recorder.Result()
+	defer res.Body.Close()
 	out1 := res.StatusCode
 	fmt.Println(out1)
 	out2 := res.Header.Get("Content-type")
@@ -91,7 +94,7 @@ func ExampleCreateRootHandler() {
 	// text/html; charset=utf-8
 }
 
-func ExampleValueHandler() {
+func ExampleAPI_ValueHandler() {
 	db := &memory.MemorySt{
 		Gauge: &safe.MRepo[mondata.GaugeVType]{},
 		Counter: &safe.MRepo[mondata.CounterVType]{
@@ -111,10 +114,10 @@ func ExampleValueHandler() {
 	r := chi.NewRouter()
 	r.Get("/value/{type}/{name}", h)
 	recorder := httptest.NewRecorder()
-
 	r.ServeHTTP(recorder, req)
 
 	res := recorder.Result()
+	defer res.Body.Close()
 	out1 := res.StatusCode
 	fmt.Println(out1)
 	out2, _, _ := db.GetCounter(context.TODO(), "PollCount")
@@ -125,7 +128,7 @@ func ExampleValueHandler() {
 	// 2
 }
 
-func ExampleValueRootHandler() {
+func ExampleAPI_ValueRootHandler() {
 	db := &memory.MemorySt{
 		Gauge: &safe.MRepo[mondata.GaugeVType]{},
 		Counter: &safe.MRepo[mondata.CounterVType]{
@@ -146,7 +149,7 @@ func ExampleValueRootHandler() {
 	r.ServeHTTP(recorder, req)
 
 	res := recorder.Result()
-
+	defer res.Body.Close()
 	out1 := res.StatusCode
 	fmt.Println(out1)
 	out2, _, _ := db.GetCounter(context.TODO(), "PollCount")
@@ -154,7 +157,6 @@ func ExampleValueRootHandler() {
 	respBody, _ := io.ReadAll(res.Body)
 	out3 := string(respBody)
 	fmt.Println(out3)
-	res.Body.Close()
 
 	// Output:
 	// 200
