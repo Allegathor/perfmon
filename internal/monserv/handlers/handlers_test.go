@@ -17,23 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func WrapWithChiCtx(req *http.Request, params map[string]string) *http.Request {
-	if req.RequestURI == "/update" || req.RequestURI == "/value" {
-		req.Header.Add("Content-Type", "application/json")
-	}
-
-	ctx := chi.NewRouteContext()
-	for k, v := range params {
-		ctx.URLParams.Add(k, v)
-	}
-
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
-}
-
-type logger struct{}
-
-func (l *logger) Errorln(...any) {}
-
 // MARK: Update
 func TestUpdateHandler(t *testing.T) {
 	type want[T int64 | float64] struct {
@@ -191,7 +174,7 @@ func TestUpdateHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewAPI(tt.db, &logger{}).UpdateHandler
+			h := NewAPI(tt.db, &ErrLoggerMock{}).UpdateHandler
 			r := chi.NewRouter()
 			r.Post("/update/{type}/{name}/{value}", h)
 			recorder := httptest.NewRecorder()
@@ -352,7 +335,7 @@ func TestUpdateRootHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewAPI(tt.db, &logger{}).UpdateRootHandler
+			h := NewAPI(tt.db, &ErrLoggerMock{}).UpdateRootHandler
 			r := chi.NewRouter()
 			r.Post("/update", h)
 			recorder := httptest.NewRecorder()
@@ -460,7 +443,7 @@ func TestCreateRootHandler(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			h := NewAPI(tt.db, &logger{}).CreateRootHandler(tt.filePath)
+			h := NewAPI(tt.db, &ErrLoggerMock{}).CreateRootHandler(tt.filePath)
 			r := chi.NewRouter()
 			r.Get("/", h)
 
@@ -605,7 +588,7 @@ func TestValueHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewAPI(tt.db, &logger{}).ValueHandler
+			h := NewAPI(tt.db, &ErrLoggerMock{}).ValueHandler
 			r := chi.NewRouter()
 			r.Get("/value/{type}/{name}", h)
 			recorder := httptest.NewRecorder()
@@ -762,7 +745,7 @@ func TestValueRootHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewAPI(tt.db, &logger{}).ValueRootHandler
+			h := NewAPI(tt.db, &ErrLoggerMock{}).ValueRootHandler
 			r := chi.NewRouter()
 			r.Post("/value", h)
 			recorder := httptest.NewRecorder()
