@@ -20,9 +20,10 @@ const (
 	URLPathValue = "value"
 )
 
+// RespError is used for errors in handlers
 type RespError struct {
 	err error
-	msg string
+	msg string // provide message for http-response
 }
 
 func NewRespError(msg string, err error) *RespError {
@@ -61,6 +62,7 @@ type Setters interface {
 	SetCounterAll(ctx context.Context, gaugeMap mondata.CounterMap) error
 }
 
+// Database interface
 type MDB interface {
 	Getters
 	Setters
@@ -71,6 +73,7 @@ type ErrLogger interface {
 	Errorln(...any)
 }
 
+// HTTP API
 type API struct {
 	db     MDB
 	logger ErrLogger
@@ -83,12 +86,22 @@ func NewAPI(db MDB, logger ErrLogger) *API {
 	}
 }
 
+// Logs error and responds with error code and error message
 func (api *API) Error(rw http.ResponseWriter, err *RespError, code int) {
 	api.logger.Errorln(err)
 	http.Error(rw, err.Msg(), code)
 }
 
+// Responds with html-template which represents table with all collected metrics
 func (api *API) CreateRootHandler(path string) http.HandlerFunc {
+
+	if path == "" {
+		dir, _ := os.Getwd()
+		path = dir + "/templates/index.html"
+	}
+
+	tmpl, tmplErr := template.New("index.html").ParseFiles(path)
+
 	return func(rw http.ResponseWriter, req *http.Request) {
 		type Vals interface {
 			map[string]float64 | map[string]int64
@@ -118,20 +131,14 @@ func (api *API) CreateRootHandler(path string) http.HandlerFunc {
 			Table[map[string]int64]{Name: "Counter", Content: cVals},
 		}
 
-		if path == "" {
-			dir, _ := os.Getwd()
-			path = dir + "/templates/index.html"
-		}
-
-		t, err := template.New("index.html").ParseFiles(path)
-		if err != nil {
+		if tmplErr != nil {
 			respErr := NewRespError("file parsing error", err)
 			api.Error(rw, respErr, http.StatusInternalServerError)
 			return
 		}
 
 		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
-		err = t.Execute(rw, viewData)
+		err = tmpl.Execute(rw, viewData)
 		if err != nil {
 			respErr := NewRespError("template execution error", err)
 			api.Error(rw, respErr, http.StatusInternalServerError)
@@ -139,6 +146,9 @@ func (api *API) CreateRootHandler(path string) http.HandlerFunc {
 	}
 }
 
+// Validates metric type, name and value.
+//
+// If succeeded updates values in database.
 func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespError) {
 	if m.ID == "" {
 		return http.StatusNotFound, NewRespError("name must contain a value", nil)
@@ -180,6 +190,9 @@ func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespE
 	return http.StatusBadRequest, NewRespError("incorrect request type", nil)
 }
 
+// Accepts requests with URL params: type/name/value.
+//
+// Updates specified metric and respond with 200 if succeeded.
 func (api *API) UpdateHandler(rw http.ResponseWriter, req *http.Request) {
 	var m = &mondata.Metrics{}
 
@@ -195,6 +208,9 @@ func (api *API) UpdateHandler(rw http.ResponseWriter, req *http.Request) {
 	rw.WriteHeader(code)
 }
 
+// Accepts requests with JSON-body, that contains single metric data.
+//
+// Updates specified metric and respond with 200 if succeeded.
 func (api *API) UpdateRootHandler(rw http.ResponseWriter, req *http.Request) {
 	if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
 		var buf bytes.Buffer
@@ -235,6 +251,9 @@ func (api *API) UpdateRootHandler(rw http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// Accepts requests with JSON-body, that contains array of metric data.
+//
+// Updates specified metrics and respond with 200 if succeeded.
 func (api *API) UpdateBatchHandler(rw http.ResponseWriter, req *http.Request) {
 	if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
 		var buf bytes.Buffer
@@ -353,6 +372,9 @@ func getVhData(ctx context.Context, m *mondata.Metrics, db MDB) (*vhData, *RespE
 	return &vhData{code: http.StatusBadRequest}, NewRespError("incorrect request type", nil)
 }
 
+// Accepts request with next URL params: type/name.
+//
+// Responds with text/plain body containing specified value.
 func (api *API) ValueHandler(rw http.ResponseWriter, req *http.Request) {
 	m := &mondata.Metrics{}
 	m.MType = chi.URLParam(req, URLPathType)
@@ -370,6 +392,9 @@ func (api *API) ValueHandler(rw http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// Accepts request with JSON body containing metrics.
+//
+// Responds with JSON body containing specified value.
 func (api *API) ValueRootHandler(rw http.ResponseWriter, req *http.Request) {
 	if strings.Contains(req.Header.Get("Content-Type"), "application/json") {
 		var buf bytes.Buffer
@@ -423,6 +448,7 @@ func (api *API) ValueRootHandler(rw http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// Checks database connection
 func (api *API) PingHandler(rw http.ResponseWriter, req *http.Request) {
 	err := api.db.Ping(req.Context())
 	if err != nil {

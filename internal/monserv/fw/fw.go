@@ -31,18 +31,22 @@ type MDB interface {
 	Setters
 }
 
+// Backup is used for saving data on-demand or using schedule
+// it could restore data and set it to provided database
 type Backup struct {
 	mu          sync.Mutex
 	Path        string
 	Interval    uint
 	Logger      *zap.SugaredLogger
-	RestoreFlag bool
+	RestoreFlag bool // set to true/false on init
 }
 
+// Returns RestoreFlag
 func (b *Backup) ShouldRestore() bool {
 	return b.RestoreFlag
 }
 
+// Read previous data from disk and if succeeded set it to database
 func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
 	if !b.ShouldRestore() {
 		return nil
@@ -112,6 +116,10 @@ func (b *Backup) RestorePrev(db repo.MetricsRepo) error {
 	return nil
 }
 
+// Write metrics data to a JSON-file.
+// Data stored in the next format:
+//
+//	[{Alloc: 1.1, ...gaugeMetrics}, {counter: 1, ...counterMetrics}]
 func (b *Backup) Write(db repo.MetricsRepo, truncateFlag bool) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -170,6 +178,7 @@ func (b *Backup) Write(db repo.MetricsRepo, truncateFlag bool) error {
 	return nil
 }
 
+// Schedule writing data to a file
 func (b *Backup) Schedule(ctx context.Context, db repo.MetricsRepo) error {
 	var wg sync.WaitGroup
 

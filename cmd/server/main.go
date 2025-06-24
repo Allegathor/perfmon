@@ -24,6 +24,7 @@ type flags struct {
 	dbConnStr     string
 	mode          string
 	path          string
+	key           string
 	storeInterval uint
 	restore       bool
 }
@@ -35,6 +36,7 @@ var defSrvOpts = &flags{
 	dbConnStr:     "",
 	mode:          "dev",
 	path:          "./backup.json",
+	key:           "",
 	storeInterval: 300,
 	restore:       false,
 }
@@ -43,6 +45,7 @@ func init() {
 	flag.StringVar(&srvOpts.addr, "a", defSrvOpts.addr, "address to runing a server on")
 	flag.StringVar(&srvOpts.dbConnStr, "d", defSrvOpts.dbConnStr, "URL for DB connection")
 	flag.StringVar(&srvOpts.mode, "m", defSrvOpts.mode, "mode of running the server: dev or prod")
+	flag.StringVar(&srvOpts.key, "k", defSrvOpts.key, "key for signing data")
 	flag.StringVar(&srvOpts.path, "f", defSrvOpts.path, "path to backup file")
 	flag.UintVar(&srvOpts.storeInterval, "i", defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
 	flag.BoolVar(&srvOpts.restore, "r", defSrvOpts.restore, "option to restore from backup file on startup")
@@ -52,6 +55,7 @@ func setEnv() {
 	options.SetEnvStr(&srvOpts.addr, "ADDRESS")
 	options.SetEnvStr(&srvOpts.dbConnStr, "DATABASE_DSN")
 	options.SetEnvStr(&srvOpts.mode, "MODE")
+	options.SetEnvStr(&srvOpts.key, "KEY")
 	options.SetEnvStr(&srvOpts.path, "FILE_STORAGE_PATH")
 	options.SetEnvUint(&srvOpts.storeInterval, "STORE_INTERVAL")
 	options.SetEnvBool(&srvOpts.restore, "RESTORE")
@@ -121,7 +125,7 @@ func main() {
 	}()
 	wg.Wait()
 
-	s := monserv.NewInstance(ctx, srvOpts.addr, db, logger)
+	s := monserv.NewInstance(ctx, srvOpts.addr, db, srvOpts.key, logger)
 	s.MountHandlers()
 
 	g, gCtx := errgroup.WithContext(ctx)
