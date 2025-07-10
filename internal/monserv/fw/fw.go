@@ -163,7 +163,7 @@ func (b *Backup) Write(db repo.MetricsRepo, truncateFlag bool) error {
 
 	slb = append(slb, pt1)
 
-	if !(len(pt2) < 3) {
+	if len(pt2) >= 3 {
 		slb = append(slb, pt2)
 	}
 

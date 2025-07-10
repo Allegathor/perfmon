@@ -154,7 +154,8 @@ func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespE
 		return http.StatusNotFound, NewRespError("name must contain a value", nil)
 	}
 
-	if m.MType == mondata.GaugeType {
+	switch m.MType {
+	case mondata.GaugeType:
 		if m.SValue != "" {
 			v, err := mondata.ParseGauge(m.SValue)
 			if err != nil {
@@ -169,8 +170,7 @@ func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespE
 		}
 
 		return http.StatusOK, nil
-
-	} else if m.MType == mondata.CounterType {
+	case mondata.CounterType:
 		if m.SValue != "" {
 			d, err := mondata.ParseCounter(m.SValue)
 			if err != nil {
@@ -184,10 +184,9 @@ func updateMetrics(ctx context.Context, m *mondata.Metrics, db MDB) (int, *RespE
 			return http.StatusInternalServerError, NewRespError("setting counter value in db failed", err)
 		}
 		return http.StatusOK, nil
-
+	default:
+		return http.StatusBadRequest, NewRespError("incorrect request type", nil)
 	}
-
-	return http.StatusBadRequest, NewRespError("incorrect request type", nil)
 }
 
 // Accepts requests with URL params: type/name/value.
@@ -341,7 +340,8 @@ func getVhData(ctx context.Context, m *mondata.Metrics, db MDB) (*vhData, *RespE
 		return &vhData{code: http.StatusNotFound}, NewRespError("name must contain a value", nil)
 	}
 
-	if m.MType == mondata.GaugeType {
+	switch m.MType {
+	case mondata.GaugeType:
 		v, ok, err := db.GetGauge(ctx, m.ID)
 		if err != nil {
 			return &vhData{code: http.StatusInternalServerError}, NewRespError("getting gauge value from db failed", err)
@@ -354,7 +354,7 @@ func getVhData(ctx context.Context, m *mondata.Metrics, db MDB) (*vhData, *RespE
 			}, nil
 		}
 		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in the storage", nil)
-	} else if m.MType == mondata.CounterType {
+	case mondata.CounterType:
 		v, ok, err := db.GetCounter(ctx, m.ID)
 		if err != nil {
 			return &vhData{code: http.StatusInternalServerError}, NewRespError("getting counter value from db failed", err)
@@ -367,9 +367,9 @@ func getVhData(ctx context.Context, m *mondata.Metrics, db MDB) (*vhData, *RespE
 			}, nil
 		}
 		return &vhData{code: http.StatusNotFound}, NewRespError("value doesn't exist in the storage", nil)
+	default:
+		return &vhData{code: http.StatusBadRequest}, NewRespError("incorrect request type", nil)
 	}
-
-	return &vhData{code: http.StatusBadRequest}, NewRespError("incorrect request type", nil)
 }
 
 // Accepts request with next URL params: type/name.
@@ -406,8 +406,8 @@ func (api *API) ValueRootHandler(rw http.ResponseWriter, req *http.Request) {
 		}
 
 		defer func() {
-			err := req.Body.Close()
-			if err != nil {
+			closeErr := req.Body.Close()
+			if closeErr != nil {
 				respErr := NewRespError("working with request body failed", err)
 				api.Error(rw, respErr, http.StatusInternalServerError)
 				return

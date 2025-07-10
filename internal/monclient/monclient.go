@@ -123,8 +123,8 @@ func (m *MonClient) Post(p []byte, path string) {
 	req := m.Client.R()
 
 	if m.h != nil {
-		_, err := m.h.Write(p)
-		if err != nil {
+		_, wErr := m.h.Write(p)
+		if wErr != nil {
 			log.Fatal(err)
 		}
 

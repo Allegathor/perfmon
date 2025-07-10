@@ -90,12 +90,12 @@ func (pg *PgSQL) ExecuteTx(
 
 			defer tx.Rollback(ctx)
 
-			if err := fnc(tx); err != nil {
-				return err
+			if fnErr := fnc(tx); fnErr != nil {
+				return fnErr
 			}
 
-			if err := tx.Commit(ctx); err != nil {
-				return fmt.Errorf("failed to commit: %w", err)
+			if commitErr := tx.Commit(ctx); commitErr != nil {
+				return fmt.Errorf("failed to commit: %w", commitErr)
 			}
 
 			return err
