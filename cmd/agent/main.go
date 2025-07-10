@@ -13,6 +13,12 @@ import (
 	"github.com/Allegathor/perfmon/internal/options"
 )
 
+var (
+	buildVersion = "N/A"
+	buildDate    = "N/A"
+	buildCommit  = "N/A"
+)
+
 type flags struct {
 	addr           string
 	key            string
@@ -75,6 +81,7 @@ func setEnv() {
 func main() {
 	flag.Parse()
 	setEnv()
+	fmt.Printf("\nBuild version: %s\nBuild date: %s\nBuild commit: %s\n", buildVersion, buildDate, buildCommit)
 
 	client := monclient.NewInstance(agOpts.addr, agOpts.key, agOpts.reportInterval)
 	cl := collector.New(agOpts.pollInterval)
