@@ -1,26 +1,41 @@
 package main
 
 import (
+	"crypto/rsa"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 
+	"github.com/Allegathor/perfmon/internal/ciphers"
 	collector "github.com/Allegathor/perfmon/internal/collector"
 	"github.com/Allegathor/perfmon/internal/monclient"
+	"github.com/Allegathor/perfmon/internal/options"
+)
+
+var (
+	buildVersion = "N/A"
+	buildDate    = "N/A"
+	buildCommit  = "N/A"
 )
 
 type flags struct {
 	addr           string
+	key            string
+	publicKeyPath  string
+	rateLimit      uint
 	reportInterval uint
 	pollInterval   uint
 }
 
 var defOpts = &flags{
 	addr:           "http://localhost:8080",
+	key:            "",
+	publicKeyPath:  "",
+	rateLimit:      3,
 	reportInterval: 10,
 	pollInterval:   2,
 }
@@ -39,54 +54,55 @@ func setAddr(value string, defaultValue string) string {
 	return value
 }
 
-var sp = os.Getenv("FILE_STORAGE_PATH")
-var opts flags
+var agOpts = &flags{
+	addr: defOpts.addr,
+}
 
 func init() {
-	opts.addr = defOpts.addr
-	envAddr := os.Getenv("ADDRESS")
+	flag.Func("a", "address of a server to send metrics", func(flagValue string) error {
+		fmt.Println(flagValue, defOpts.addr)
+		agOpts.addr = setAddr(flagValue, defOpts.addr)
+		return nil
+	})
+	flag.StringVar(&agOpts.key, "k", defOpts.key, "key for signing data in requests")
+	flag.StringVar(&agOpts.publicKeyPath, "crypto-key", defOpts.publicKeyPath, "path to .pem file with a public key")
+	flag.UintVar(&agOpts.rateLimit, "l", defOpts.rateLimit, "maximum requests with report to a server")
+	flag.UintVar(&agOpts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
+	flag.UintVar(&agOpts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
+}
 
-	if envAddr != "" {
-		opts.addr = setAddr(envAddr, defOpts.addr)
-	} else {
-		flag.Func("a", "address of a server to send metrics", func(flagValue string) error {
-			opts.addr = setAddr(flagValue, defOpts.addr)
-			return nil
-		})
-	}
-
-	envr := os.Getenv("REPORT_INTERVAL")
-	if envr != "" {
-		r, err := strconv.ParseUint(envr, 10, 32)
-		if err != nil {
-			fmt.Println(err.Error())
-			flag.UintVar(&opts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
+func setEnv() {
+	if v, ok := os.LookupEnv("ADDRESS"); ok {
+		addr := setAddr(v, "")
+		if addr != "" {
+			agOpts.addr = addr
 		}
-		opts.reportInterval = uint(r)
-	} else {
-		flag.UintVar(&opts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
 	}
+	options.SetEnvStr(&agOpts.key, "KEY")
 
-	envp := os.Getenv("POLL_INTERVAL")
-	if envp != "" {
-		p, err := strconv.ParseUint(envp, 10, 32)
-		if err != nil {
-			fmt.Println(err.Error())
-			flag.UintVar(&opts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
-		}
-		opts.pollInterval = uint(p)
-	} else {
-		flag.UintVar(&opts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
-	}
+	options.SetEnvUint(&agOpts.reportInterval, "REPORT_INTERVAL")
+	options.SetEnvUint(&agOpts.pollInterval, "POLL_INTERVAL")
 }
 
 func main() {
 	flag.Parse()
-	client := monclient.NewInstance(opts.addr, opts.reportInterval)
-	cl := collector.New(opts.pollInterval)
+	setEnv()
+	fmt.Printf("\nBuild version: %s\nBuild date: %s\nBuild commit: %s\n", buildVersion, buildDate, buildCommit)
+
+	var cryptoKey *rsa.PublicKey
+	if agOpts.publicKeyPath != "" {
+		k, err := ciphers.ReadPublicKey(agOpts.publicKeyPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cryptoKey = k
+	}
+
+	client := monclient.NewInstance(agOpts.addr, agOpts.key, cryptoKey, agOpts.reportInterval)
+	cl := collector.New(agOpts.pollInterval)
 
 	go cl.Monitor()
-	go client.PollStatsBatch(cl)
+	go client.PollStatsBatch(cl, agOpts.rateLimit, 9)
 
 	runtime.Goexit()
 }
