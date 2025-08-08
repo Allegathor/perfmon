@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/hmac"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/Allegathor/perfmon/internal/ciphers"
 	"github.com/Allegathor/perfmon/internal/collector"
 	"github.com/Allegathor/perfmon/internal/mondata"
 	"github.com/go-resty/resty/v2"
@@ -26,10 +28,11 @@ type MonClient struct {
 	addr           string
 	reportInterval uint
 	h              hash.Hash
+	cryptoKey      *rsa.PublicKey
 	Client         *resty.Client
 }
 
-func NewInstance(addr string, key string, interval uint) *MonClient {
+func NewInstance(addr string, key string, cryptoKey *rsa.PublicKey, interval uint) *MonClient {
 	retryCount := 3
 
 	c := resty.New()
@@ -57,6 +60,7 @@ func NewInstance(addr string, key string, interval uint) *MonClient {
 	m := &MonClient{
 		addr:           addr,
 		h:              h,
+		cryptoKey:      cryptoKey,
 		reportInterval: interval,
 		Client:         c,
 	}
@@ -113,6 +117,14 @@ func buildReqBatchBody(gm map[string]float64, cm map[string]int64) []byte {
 
 func (m *MonClient) Post(p []byte, path string) {
 	var buf bytes.Buffer
+	if m.cryptoKey != nil {
+		encMsg, err := ciphers.EncryptMsg(m.cryptoKey, p)
+		if err != nil {
+			log.Fatal(err)
+		}
+		p = encMsg
+	}
+
 	zw := gzip.NewWriter(&buf)
 	_, err := zw.Write(p)
 	if err != nil {

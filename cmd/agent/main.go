@@ -1,13 +1,16 @@
 package main
 
 import (
+	"crypto/rsa"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"runtime"
 	"strings"
 
+	"github.com/Allegathor/perfmon/internal/ciphers"
 	collector "github.com/Allegathor/perfmon/internal/collector"
 	"github.com/Allegathor/perfmon/internal/monclient"
 	"github.com/Allegathor/perfmon/internal/options"
@@ -22,6 +25,7 @@ var (
 type flags struct {
 	addr           string
 	key            string
+	publicKeyPath  string
 	rateLimit      uint
 	reportInterval uint
 	pollInterval   uint
@@ -30,6 +34,7 @@ type flags struct {
 var defOpts = &flags{
 	addr:           "http://localhost:8080",
 	key:            "",
+	publicKeyPath:  "",
 	rateLimit:      3,
 	reportInterval: 10,
 	pollInterval:   2,
@@ -60,6 +65,7 @@ func init() {
 		return nil
 	})
 	flag.StringVar(&agOpts.key, "k", defOpts.key, "key for signing data in requests")
+	flag.StringVar(&agOpts.publicKeyPath, "crypto-key", defOpts.publicKeyPath, "path to .pem file with a public key")
 	flag.UintVar(&agOpts.rateLimit, "l", defOpts.rateLimit, "maximum requests with report to a server")
 	flag.UintVar(&agOpts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
 	flag.UintVar(&agOpts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
@@ -83,7 +89,16 @@ func main() {
 	setEnv()
 	fmt.Printf("\nBuild version: %s\nBuild date: %s\nBuild commit: %s\n", buildVersion, buildDate, buildCommit)
 
-	client := monclient.NewInstance(agOpts.addr, agOpts.key, agOpts.reportInterval)
+	var cryptoKey *rsa.PublicKey
+	if agOpts.publicKeyPath != "" {
+		k, err := ciphers.ReadPublicKey(agOpts.publicKeyPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cryptoKey = k
+	}
+
+	client := monclient.NewInstance(agOpts.addr, agOpts.key, cryptoKey, agOpts.reportInterval)
 	cl := collector.New(agOpts.pollInterval)
 
 	go cl.Monitor()

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"errors"
 	"flag"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Allegathor/perfmon/internal/ciphers"
 	"github.com/Allegathor/perfmon/internal/monserv"
 	"github.com/Allegathor/perfmon/internal/monserv/fw"
 	"github.com/Allegathor/perfmon/internal/options"
@@ -26,25 +28,27 @@ var (
 )
 
 type flags struct {
-	addr          string
-	dbConnStr     string
-	mode          string
-	path          string
-	key           string
-	storeInterval uint
-	restore       bool
+	addr           string
+	dbConnStr      string
+	mode           string
+	path           string
+	key            string
+	privateKeyPath string
+	storeInterval  uint
+	restore        bool
 }
 
 var srvOpts flags
 
 var defSrvOpts = &flags{
-	addr:          "localhost:8080",
-	dbConnStr:     "",
-	mode:          "dev",
-	path:          "./backup.json",
-	key:           "",
-	storeInterval: 300,
-	restore:       false,
+	addr:           "localhost:8080",
+	dbConnStr:      "",
+	mode:           "dev",
+	path:           "./backup.json",
+	privateKeyPath: "",
+	key:            "",
+	storeInterval:  300,
+	restore:        false,
 }
 
 func init() {
@@ -52,6 +56,7 @@ func init() {
 	flag.StringVar(&srvOpts.dbConnStr, "d", defSrvOpts.dbConnStr, "URL for DB connection")
 	flag.StringVar(&srvOpts.mode, "m", defSrvOpts.mode, "mode of running the server: dev or prod")
 	flag.StringVar(&srvOpts.key, "k", defSrvOpts.key, "key for signing data")
+	flag.StringVar(&srvOpts.privateKeyPath, "crypto-key", defSrvOpts.privateKeyPath, "path to .pem file with a private key")
 	flag.StringVar(&srvOpts.path, "f", defSrvOpts.path, "path to backup file")
 	flag.UintVar(&srvOpts.storeInterval, "i", defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
 	flag.BoolVar(&srvOpts.restore, "r", defSrvOpts.restore, "option to restore from backup file on startup")
@@ -62,6 +67,7 @@ func setEnv() {
 	options.SetEnvStr(&srvOpts.dbConnStr, "DATABASE_DSN")
 	options.SetEnvStr(&srvOpts.mode, "MODE")
 	options.SetEnvStr(&srvOpts.key, "KEY")
+	options.SetEnvStr(&srvOpts.privateKeyPath, "CRYPTO_KEY")
 	options.SetEnvStr(&srvOpts.path, "FILE_STORAGE_PATH")
 	options.SetEnvUint(&srvOpts.storeInterval, "STORE_INTERVAL")
 	options.SetEnvBool(&srvOpts.restore, "RESTORE")
@@ -132,7 +138,16 @@ func main() {
 	}()
 	wg.Wait()
 
-	s := monserv.NewInstance(ctx, srvOpts.addr, db, srvOpts.key, logger)
+	var cryptoKey *rsa.PrivateKey
+	if srvOpts.privateKeyPath != "" {
+		cryptoKey, err = ciphers.ReadPrivateKey(srvOpts.privateKeyPath)
+		if err != nil {
+			logger.Errorf("erorr reading private key from file", err)
+			os.Exit(-1)
+		}
+	}
+
+	s := monserv.NewInstance(ctx, srvOpts.addr, db, srvOpts.key, cryptoKey, logger)
 	s.MountHandlers()
 
 	g, gCtx := errgroup.WithContext(ctx)
