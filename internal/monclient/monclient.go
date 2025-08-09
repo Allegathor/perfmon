@@ -3,10 +3,17 @@ package monclient
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/hmac"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash"
+	"log"
 	"time"
 
+	"github.com/Allegathor/perfmon/internal/ciphers"
 	"github.com/Allegathor/perfmon/internal/collector"
 	"github.com/Allegathor/perfmon/internal/mondata"
 	"github.com/go-resty/resty/v2"
@@ -20,10 +27,12 @@ const (
 type MonClient struct {
 	addr           string
 	reportInterval uint
+	h              hash.Hash
+	cryptoKey      *rsa.PublicKey
 	Client         *resty.Client
 }
 
-func NewInstance(addr string, interval uint) *MonClient {
+func NewInstance(addr string, key string, cryptoKey *rsa.PublicKey, interval uint) *MonClient {
 	retryCount := 3
 
 	c := resty.New()
@@ -43,8 +52,15 @@ func NewInstance(addr string, interval uint) *MonClient {
 			return delay, nil
 		})
 
+	var h hash.Hash = nil
+	if key != "" {
+		h = hmac.New(sha256.New, []byte(key))
+	}
+
 	m := &MonClient{
 		addr:           addr,
+		h:              h,
+		cryptoKey:      cryptoKey,
 		reportInterval: interval,
 		Client:         c,
 	}
@@ -94,21 +110,42 @@ func buildReqBatchBody(gm map[string]float64, cm map[string]int64) []byte {
 
 	j, err := json.Marshal(mbatch)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	return j
 }
 
 func (m *MonClient) Post(p []byte, path string) {
 	var buf bytes.Buffer
+	if m.cryptoKey != nil {
+		encMsg, err := ciphers.EncryptMsg(m.cryptoKey, p)
+		if err != nil {
+			log.Fatal(err)
+		}
+		p = encMsg
+	}
+
 	zw := gzip.NewWriter(&buf)
 	_, err := zw.Write(p)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	zw.Close()
 
-	resp, err := m.Client.R().
+	req := m.Client.R()
+
+	if m.h != nil {
+		_, wErr := m.h.Write(p)
+		if wErr != nil {
+			log.Fatal(err)
+		}
+
+		signStr := base64.URLEncoding.EncodeToString(m.h.Sum(nil))
+		req.SetHeader("HashSHA256", signStr)
+		m.h.Reset()
+	}
+
+	resp, err := req.
 		SetHeader("Accept-Encoding", "gzip").
 		SetHeader("Content-Encoding", "gzip").
 		SetHeader("Content-Type", "application/json; charset=utf-8").
@@ -116,7 +153,7 @@ func (m *MonClient) Post(p []byte, path string) {
 		Post(m.addr + path)
 
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	resp.RawBody().Close()
@@ -154,31 +191,60 @@ func (m *MonClient) PollStats(cl *collector.Collector) {
 
 }
 
-func (m *MonClient) PollStatsBatch(cl *collector.Collector) {
+type Report struct {
+	gm map[string]float64
+	cm map[string]int64
+	id int64
+}
+
+func (m *MonClient) PollWorker(idx uint, reps <-chan *Report, out chan<- int64) {
+	for r := range reps {
+		b := buildReqBatchBody(r.gm, r.cm)
+		if len(b) > 0 {
+			m.Post(b, updateBatchPath)
+		}
+		fmt.Printf("worker %d complete job N%d\n", idx, r.id)
+		out <- r.id
+	}
+}
+
+func (m *MonClient) PollStatsBatch(cl *collector.Collector, wpoolCount uint, chCap uint) {
+	var id int64
+	repsCh := make(chan *Report, chCap)
+	reqCh := make(chan int64)
+
+	for i := range wpoolCount {
+		go m.PollWorker(i, repsCh, reqCh)
+	}
+
+	ticker := time.NewTicker(time.Duration(m.reportInterval) * time.Second)
 	for {
-		time.Sleep(time.Duration(m.reportInterval) * time.Second)
-		go func() {
-			var (
-				gm map[string]float64
-				cm map[string]int64
-			)
+		select {
+		case <-ticker.C:
+			go func() {
+				var (
+					gm map[string]float64
+					cm map[string]int64
+				)
 
-			cl.Repo.Gauge.Read(func(tx *collector.MtcsTx[float64]) error {
-				gm = tx.GetAll()
+				cl.Repo.Gauge.Read(func(tx *collector.MtcsTx[float64]) error {
+					gm = tx.GetAll()
 
-				return nil
-			})
+					return nil
+				})
 
-			cl.Repo.Counter.Read(func(tx *collector.MtcsTx[int64]) error {
-				cm = tx.GetAll()
+				cl.Repo.Counter.Read(func(tx *collector.MtcsTx[int64]) error {
+					cm = tx.GetAll()
 
-				return nil
-			})
+					return nil
+				})
 
-			b := buildReqBatchBody(gm, cm)
-			if len(b) > 0 {
-				m.Post(b, updateBatchPath)
-			}
-		}()
+				repsCh <- &Report{gm, cm, id}
+
+				id++
+			}()
+		case <-reqCh:
+			// TODO
+		}
 	}
 }
