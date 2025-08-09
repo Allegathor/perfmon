@@ -1,20 +1,25 @@
 package main
 
 import (
+	"context"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"regexp"
-	"runtime"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Allegathor/perfmon/internal/ciphers"
 	collector "github.com/Allegathor/perfmon/internal/collector"
 	"github.com/Allegathor/perfmon/internal/monclient"
 	"github.com/Allegathor/perfmon/internal/options"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -108,6 +113,16 @@ func setEnv() {
 func main() {
 	flag.Parse()
 	setEnv()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+
+		<-c
+		cancel()
+	}()
+
 	fmt.Printf("\nBuild version: %s\nBuild date: %s\nBuild commit: %s\n", buildVersion, buildDate, buildCommit)
 
 	var cryptoKey *rsa.PublicKey
@@ -122,8 +137,32 @@ func main() {
 	client := monclient.NewInstance(agOpts.Addr, agOpts.Key, cryptoKey, agOpts.ReportInterval)
 	cl := collector.New(agOpts.PollInterval)
 
-	go cl.Monitor()
-	go client.PollStatsBatch(cl, agOpts.RateLimit, 9)
+	g, gCtx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		return cl.Monitor(gCtx)
+	})
+	g.Go(func() error {
+		return client.PollStatsBatch(gCtx, cl, agOpts.RateLimit, 9)
+	})
+	g.Go(func() error {
+		<-gCtx.Done()
+		timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
 
-	runtime.Goexit()
+		go func() error {
+			<-timeoutCtx.Done()
+			if timeoutCtx.Err() == context.DeadlineExceeded {
+				return errors.New("timed out performing graceful shutdown")
+			}
+
+			return nil
+		}()
+
+		return errors.New("agent shutdown")
+	})
+
+	fmt.Printf("agent was started, addr:%s\n", agOpts.Addr)
+	if err := g.Wait(); err != nil {
+		fmt.Printf("exit reason: %s\n", err)
+	}
 }

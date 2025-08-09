@@ -3,14 +3,17 @@ package monclient
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/hmac"
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/Allegathor/perfmon/internal/ciphers"
@@ -197,54 +200,65 @@ type Report struct {
 	id int64
 }
 
-func (m *MonClient) PollWorker(idx uint, reps <-chan *Report, out chan<- int64) {
+func (m *MonClient) PollWorker(idx uint, reps <-chan *Report, wg *sync.WaitGroup) {
+	defer wg.Done()
 	for r := range reps {
 		b := buildReqBatchBody(r.gm, r.cm)
 		if len(b) > 0 {
 			m.Post(b, updateBatchPath)
 		}
 		fmt.Printf("worker %d complete job N%d\n", idx, r.id)
-		out <- r.id
 	}
 }
 
-func (m *MonClient) PollStatsBatch(cl *collector.Collector, wpoolCount uint, chCap uint) {
+func readStats(id int64, cl *collector.Collector, wg *sync.WaitGroup, repsCh chan<- *Report) {
+	var (
+		gm map[string]float64
+		cm map[string]int64
+	)
+	defer wg.Done()
+
+	cl.Repo.Gauge.Read(func(tx *collector.MtcsTx[float64]) error {
+		gm = tx.GetAll()
+
+		return nil
+	})
+
+	cl.Repo.Counter.Read(func(tx *collector.MtcsTx[int64]) error {
+		cm = tx.GetAll()
+
+		return nil
+	})
+
+	repsCh <- &Report{gm, cm, id}
+
+	id++
+}
+
+func (m *MonClient) PollStatsBatch(ctx context.Context, cl *collector.Collector, wpoolCount uint, chCap uint) error {
 	var id int64
 	repsCh := make(chan *Report, chCap)
-	reqCh := make(chan int64)
 
+	var poolWG sync.WaitGroup
 	for i := range wpoolCount {
-		go m.PollWorker(i, repsCh, reqCh)
+		poolWG.Add(1)
+		go m.PollWorker(i, repsCh, &poolWG)
 	}
 
+	var tickerWG sync.WaitGroup
 	ticker := time.NewTicker(time.Duration(m.reportInterval) * time.Second)
 	for {
 		select {
 		case <-ticker.C:
-			go func() {
-				var (
-					gm map[string]float64
-					cm map[string]int64
-				)
+			tickerWG.Add(1)
+			go readStats(id, cl, &tickerWG, repsCh)
+		case <-ctx.Done():
+			ticker.Stop()
+			tickerWG.Wait()
+			close(repsCh)
+			poolWG.Wait()
 
-				cl.Repo.Gauge.Read(func(tx *collector.MtcsTx[float64]) error {
-					gm = tx.GetAll()
-
-					return nil
-				})
-
-				cl.Repo.Counter.Read(func(tx *collector.MtcsTx[int64]) error {
-					cm = tx.GetAll()
-
-					return nil
-				})
-
-				repsCh <- &Report{gm, cm, id}
-
-				id++
-			}()
-		case <-reqCh:
-			// TODO
+			return errors.New("client graceful shutdown")
 		}
 	}
 }
