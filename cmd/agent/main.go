@@ -23,7 +23,10 @@ import (
 )
 
 const (
-	configPath = "agent_config.json"
+	configPath        = "agent_config.json"
+	shutdownTimeout   = 10 * time.Second
+	readingKeyErrCode = -1
+	clientPollCap     = 9
 )
 
 var (
@@ -142,11 +145,11 @@ func main() {
 		return cl.Monitor(gCtx)
 	})
 	g.Go(func() error {
-		return client.PollStatsBatch(gCtx, cl, agOpts.RateLimit, 9)
+		return client.PollStatsBatch(gCtx, cl, agOpts.RateLimit, clientPollCap)
 	})
 	g.Go(func() error {
 		<-gCtx.Done()
-		timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		timeoutCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
 		defer cancel()
 
 		go func() error {
