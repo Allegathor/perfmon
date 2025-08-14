@@ -1,12 +1,17 @@
 package collector
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"math/rand/v2"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 type MtcsTx[T mondata.VTypes] struct {
@@ -87,10 +92,12 @@ type Repo struct {
 
 type Collector struct {
 	Repo         *Repo
+	cpuCores     int
 	pollInterval uint
 }
 
 func New(pollInterval uint) *Collector {
+	count, _ := cpu.Counts(false)
 	g := &Mtcs[float64]{
 		Data: make(map[string]float64),
 	}
@@ -104,11 +111,29 @@ func New(pollInterval uint) *Collector {
 			Gauge:   g,
 			Counter: c,
 		},
+		cpuCores:     count,
 		pollInterval: pollInterval,
 	}
 }
 
-func (c *Collector) GaugeStats() {
+func (c *Collector) GopsStats(wg *sync.WaitGroup) {
+	defer wg.Done()
+	v, _ := mem.VirtualMemory()
+	coresUt, _ := cpu.Percent(0, true)
+	c.Repo.Gauge.Update(func(tx *MtcsTx[float64]) error {
+		tx.Set("TotalMemory", float64(v.Total))
+		tx.Set("FreeMemory", float64(v.Free))
+		for i := range c.cpuCores {
+			v := coresUt[i]
+			tx.Set(fmt.Sprintf("CPUutilization%d", i+1), v)
+		}
+
+		return nil
+	})
+}
+
+func (c *Collector) RuntimeStats(wg *sync.WaitGroup) {
+	defer wg.Done()
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
@@ -154,7 +179,8 @@ func (c *Collector) GaugeStats() {
 	})
 }
 
-func (c *Collector) UpdateCounters() {
+func (c *Collector) UpdateCounters(wg *sync.WaitGroup) {
+	defer wg.Done()
 	c.Repo.Counter.Update(func(tx *MtcsTx[int64]) error {
 		tx.Set("PollCount", 1)
 
@@ -162,9 +188,16 @@ func (c *Collector) UpdateCounters() {
 	})
 }
 
-func (c *Collector) Stats() {
-	go c.GaugeStats()
-	go c.UpdateCounters()
+func (c *Collector) Stats(mainGroup *sync.WaitGroup) {
+	var wg sync.WaitGroup
+
+	wg.Add(3)
+	go c.GopsStats(&wg)
+	go c.RuntimeStats(&wg)
+	go c.UpdateCounters(&wg)
+
+	wg.Wait()
+	mainGroup.Done()
 }
 
 type MonitorResult struct {
@@ -172,9 +205,19 @@ type MonitorResult struct {
 	Counter map[string]int64
 }
 
-func (c *Collector) Monitor() {
+func (c *Collector) Monitor(ctx context.Context) error {
+	var tickerWG sync.WaitGroup
+	ticker := time.NewTicker(time.Duration(c.pollInterval) * time.Second)
 	for {
-		time.Sleep(time.Duration(c.pollInterval) * time.Second)
-		go c.Stats()
+		select {
+		case <-ticker.C:
+			tickerWG.Add(1)
+			go c.Stats(&tickerWG)
+		case <-ctx.Done():
+			ticker.Stop()
+			tickerWG.Wait()
+
+			return errors.New("collector graceful shutdown")
+		}
 	}
 }
