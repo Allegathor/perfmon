@@ -87,6 +87,7 @@ func init() {
 			fmt.Println("failed to parse json from config file")
 		}
 	}
+	options.SetEnvStr(&agOpts.key, "KEY")
 
 	flag.Func("a", "address of a server to send metrics", func(flagValue string) error {
 		fmt.Println(flagValue, defOpts.Addr)
