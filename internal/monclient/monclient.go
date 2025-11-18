@@ -25,6 +25,7 @@ import (
 const (
 	updatePath      = "/update"
 	updateBatchPath = "/updates"
+	ipAddress       = "172.18.254.1"
 )
 
 type MonClient struct {
@@ -152,6 +153,7 @@ func (m *MonClient) Post(p []byte, path string) {
 		SetHeader("Accept-Encoding", "gzip").
 		SetHeader("Content-Encoding", "gzip").
 		SetHeader("Content-Type", "application/json; charset=utf-8").
+		SetHeader("X-Real-IP", ipAddress).
 		SetBody(&buf).
 		Post(m.addr + path)
 
