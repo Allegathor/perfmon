@@ -2,6 +2,7 @@ package monserv
 
 import (
 	"context"
+	"crypto/rsa"
 	"net"
 	"net/http"
 
@@ -14,18 +15,20 @@ import (
 
 type MonServ struct {
 	*http.Server
-	db     handlers.MDB
-	key    string
-	Router *chi.Mux
-	Logger *zap.SugaredLogger
+	db        handlers.MDB
+	key       string
+	cryptoKey *rsa.PrivateKey
+	Router    *chi.Mux
+	Logger    *zap.SugaredLogger
 }
 
-func NewInstance(ctx context.Context, addr string, db handlers.MDB, key string, l *zap.SugaredLogger) *MonServ {
+func NewInstance(ctx context.Context, addr string, db handlers.MDB, key string, cryptoKey *rsa.PrivateKey, l *zap.SugaredLogger) *MonServ {
 	s := &MonServ{
-		db:     db,
-		key:    key,
-		Router: chi.NewRouter(),
-		Logger: l,
+		db:        db,
+		key:       key,
+		cryptoKey: cryptoKey,
+		Router:    chi.NewRouter(),
+		Logger:    l,
 	}
 
 	s.Server = &http.Server{Addr: addr, BaseContext: func(l net.Listener) context.Context {
@@ -47,6 +50,11 @@ func (s *MonServ) MountHandlers() {
 		umw = append(umw, middlewares.CreateSumChecker(s.key, s.Logger))
 		umw = append(umw, middlewares.CreateSigner(s.key, s.Logger))
 	}
+
+	if s.cryptoKey != nil {
+		umw = append(umw, middlewares.CreateMsgDecrypter(s.cryptoKey, s.Logger))
+	}
+
 	mw = append(mw, middlewares.CreateCompress(s.Logger))
 	umw = append(umw, middlewares.CreateCompress(s.Logger))
 

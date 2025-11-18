@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/hmac"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Allegathor/perfmon/internal/ciphers"
 	"go.uber.org/zap"
 )
 
@@ -327,6 +329,28 @@ func CreateSigner(key string, l *zap.SugaredLogger) func(next http.Handler) http
 		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 			sw := NewSignWriter(rw, key)
 			next.ServeHTTP(sw, req)
+		})
+	}
+}
+
+func CreateMsgDecrypter(key *rsa.PrivateKey, l *zap.SugaredLogger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			encBody, err := io.ReadAll(req.Body)
+			if err != nil {
+				l.Errorln("error reading body")
+				http.Error(rw, "error reading body", http.StatusInternalServerError)
+			}
+
+			body, err := ciphers.DecryptMsg(key, encBody)
+			if err != nil {
+				l.Errorln("error decrypting body")
+				http.Error(rw, "internal server error", http.StatusInternalServerError)
+			}
+
+			req.Body = io.NopCloser(bytes.NewReader(body))
+			req.ContentLength = int64(len(body))
+			next.ServeHTTP(rw, req)
 		})
 	}
 }
