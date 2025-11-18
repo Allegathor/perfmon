@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -349,6 +350,42 @@ func CreateMsgDecrypter(key *rsa.PrivateKey, l *zap.SugaredLogger) func(next htt
 
 			req.Body = io.NopCloser(bytes.NewReader(body))
 			req.ContentLength = int64(len(body))
+			next.ServeHTTP(rw, req)
+		})
+	}
+}
+
+func CreateSubnetRestrictor(subnet string, l *zap.SugaredLogger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			ipHeader := req.Header.Get("X-Real-IP")
+			if ipHeader == "" {
+				l.Error("ip header is missed")
+				http.Error(rw, "forbidden", http.StatusForbidden)
+				return
+			}
+
+			ip := net.ParseIP(subnet)
+			if ip == nil {
+				l.Errorf("Invalid IP: %v", subnet)
+				http.Error(rw, "forbidden", http.StatusForbidden)
+				return
+			}
+			_, ipNet, err := net.ParseCIDR(subnet)
+			if err != nil {
+				l.Errorf("Invalid CIDR notation: %v", subnet)
+				http.Error(rw, "Invalid CIDR", http.StatusInternalServerError)
+				return
+			}
+
+			if ipNet.Contains(ip) {
+				l.Infof("IP address %s belongs to subnet %s", ip, ipNet)
+			} else {
+				l.Errorf("IP address does not belong to subnet %s", ip, ipNet)
+				http.Error(rw, "forbidden", http.StatusForbidden)
+				return
+			}
+
 			next.ServeHTTP(rw, req)
 		})
 	}

@@ -15,20 +15,22 @@ import (
 
 type MonServ struct {
 	*http.Server
-	db        handlers.MDB
-	key       string
-	cryptoKey *rsa.PrivateKey
-	Router    *chi.Mux
-	Logger    *zap.SugaredLogger
+	db            handlers.MDB
+	key           string
+	cryptoKey     *rsa.PrivateKey
+	trustedSubnet string
+	Router        *chi.Mux
+	Logger        *zap.SugaredLogger
 }
 
-func NewInstance(ctx context.Context, addr string, db handlers.MDB, key string, cryptoKey *rsa.PrivateKey, l *zap.SugaredLogger) *MonServ {
+func NewInstance(ctx context.Context, addr string, db handlers.MDB, key string, cryptoKey *rsa.PrivateKey, subnet string, l *zap.SugaredLogger) *MonServ {
 	s := &MonServ{
-		db:        db,
-		key:       key,
-		cryptoKey: cryptoKey,
-		Router:    chi.NewRouter(),
-		Logger:    l,
+		db:            db,
+		key:           key,
+		cryptoKey:     cryptoKey,
+		trustedSubnet: subnet,
+		Router:        chi.NewRouter(),
+		Logger:        l,
 	}
 
 	s.Server = &http.Server{Addr: addr, BaseContext: func(l net.Listener) context.Context {
@@ -42,6 +44,9 @@ func (s *MonServ) MountHandlers() {
 	api := handlers.NewAPI(s.db, s.Logger)
 	s.Router.Mount("/debug/", middleware.Profiler())
 	mw := chi.Middlewares{middlewares.CreateLogger(s.Logger), middlewares.CreateUncompressReq(s.Logger)}
+	if s.trustedSubnet != "" {
+		mw = append(mw, middlewares.CreateSubnetRestrictor(s.trustedSubnet, s.Logger))
+	}
 	// update-related middlewares
 	umw := make(chi.Middlewares, len(mw))
 	copy(umw, mw)

@@ -44,6 +44,7 @@ type flags struct {
 	Path           string `json:"store_file"`
 	Key            string `json:"key"`
 	PrivateKeyPath string `json:"crypto_key"`
+	TrustedSubnet  string `json:"trusted_subnet"`
 	StoreInterval  uint   `json:"store_interval"`
 	Restore        bool   `json:"restore"`
 }
@@ -56,6 +57,7 @@ var defSrvOpts = &flags{
 	Mode:           devMode,
 	Path:           "./backup.json",
 	PrivateKeyPath: "",
+	TrustedSubnet:  "",
 	Key:            "",
 	StoreInterval:  300,
 	Restore:        false,
@@ -83,6 +85,7 @@ func init() {
 	flag.StringVar(&srvOpts.Mode, "m", defSrvOpts.Mode, "mode of running the server: dev or prod")
 	flag.StringVar(&srvOpts.Key, "k", defSrvOpts.Key, "key for signing data")
 	flag.StringVar(&srvOpts.PrivateKeyPath, "crypto-key", defSrvOpts.PrivateKeyPath, "path to .pem file with a private key")
+	flag.StringVar(&srvOpts.TrustedSubnet, "t", defSrvOpts.TrustedSubnet, "trusted subnet")
 	flag.StringVar(&srvOpts.Path, "f", defSrvOpts.Path, "path to backup file")
 	flag.UintVar(&srvOpts.StoreInterval, "i", defSrvOpts.StoreInterval, "interval (in seconds) of writing to backup file")
 	flag.BoolVar(&srvOpts.Restore, "r", defSrvOpts.Restore, "option to restore from backup file on startup")
@@ -94,6 +97,7 @@ func setEnv() {
 	options.SetEnvStr(&srvOpts.Mode, "MODE")
 	options.SetEnvStr(&srvOpts.Key, "KEY")
 	options.SetEnvStr(&srvOpts.PrivateKeyPath, "CRYPTO_KEY")
+	options.SetEnvStr(&srvOpts.TrustedSubnet, "TRUSTED_SUBNET")
 	options.SetEnvStr(&srvOpts.Path, "FILE_STORAGE_PATH")
 	options.SetEnvUint(&srvOpts.StoreInterval, "STORE_INTERVAL")
 	options.SetEnvBool(&srvOpts.Restore, "RESTORE")
@@ -172,7 +176,7 @@ func main() {
 		}
 	}
 
-	s := monserv.NewInstance(ctx, srvOpts.Addr, db, srvOpts.Key, cryptoKey, logger)
+	s := monserv.NewInstance(ctx, srvOpts.Addr, db, srvOpts.Key, cryptoKey, srvOpts.TrustedSubnet, logger)
 	s.MountHandlers()
 
 	g, gCtx := errgroup.WithContext(ctx)
