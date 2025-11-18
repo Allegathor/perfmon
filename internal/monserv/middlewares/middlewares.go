@@ -365,7 +365,7 @@ func CreateSubnetRestrictor(subnet string, l *zap.SugaredLogger) func(next http.
 				return
 			}
 
-			ip := net.ParseIP(subnet)
+			ip := net.ParseIP(ipHeader)
 			if ip == nil {
 				l.Errorf("Invalid IP: %v", subnet)
 				http.Error(rw, "forbidden", http.StatusForbidden)
