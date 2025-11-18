@@ -11,10 +11,15 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
+
+type Flusher interface {
+	Flush() error
+}
 
 type (
 	respData struct {
@@ -98,55 +103,130 @@ func (g *gzipReader) Close() error {
 	return g.gr.Close()
 }
 
+// type gzipWriter struct {
+// 	http.ResponseWriter
+// 	writer       *gzip.Writer
+// 	compressible *bool
+// }
+
+// func NewGzipWriter(rw http.ResponseWriter) *gzipWriter {
+// 	return &gzipWriter{
+// 		ResponseWriter: rw,
+// 		writer:         nil,
+// 		compressible:   nil,
+// 	}
+// }
+
+// func (gw *gzipWriter) Write(p []byte) (int, error) {
+// 	if gw.compressible == nil {
+// 		var err error
+// 		ct := gw.Header().Get("Content-Type")
+// 		allowed := strings.HasPrefix(ct, "application/json") || strings.HasPrefix(ct, "text/html")
+// 		gw.compressible = &allowed
+// 		if *gw.compressible {
+// 			gw.Header().Set("Content-Encoding", "gzip")
+// 			gw.writer, err = gzip.NewWriterLevel(gw.ResponseWriter, gzip.BestSpeed)
+// 			if err != nil {
+// 				return 0, err
+// 			}
+// 			return gw.writer.Write(p)
+// 		}
+
+// 		return gw.ResponseWriter.Write(p)
+
+// 	} else if *gw.compressible {
+// 		return gw.writer.Write(p)
+// 	}
+
+// 	return gw.ResponseWriter.Write(p)
+// }
+
+// func (gw *gzipWriter) Close() error {
+// 	if gw.writer != nil {
+// 		return gw.writer.Close()
+// 	}
+// 	return nil
+// }
+
+var gzipWriterPool = &sync.Pool{
+	New: func() any {
+		w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed)
+		return w
+	},
+}
+
 type gzipWriter struct {
 	http.ResponseWriter
-	writer       *gzip.Writer
-	compressible *bool
+	writer      *gzip.Writer
+	pool        *sync.Pool
+	wroteHeader bool
 }
 
 func NewGzipWriter(rw http.ResponseWriter) *gzipWriter {
+	gz := gzipWriterPool.Get().(*gzip.Writer)
+	gz.Reset(rw)
+
 	return &gzipWriter{
 		ResponseWriter: rw,
-		writer:         nil,
-		compressible:   nil,
+		writer:         gz,
+		pool:           gzipWriterPool,
 	}
+}
+
+func (gw *gzipWriter) GetWriter() io.Writer {
+	return gw.writer
+}
+
+func (gw *gzipWriter) WriteHeader(code int) {
+	if gw.wroteHeader {
+		gw.ResponseWriter.WriteHeader(code)
+		return
+	}
+	gw.wroteHeader = true
+	defer gw.ResponseWriter.WriteHeader(code)
+
+	if gw.Header().Get("Content-Encoding") != "" {
+		return
+	}
+
+	gw.Header().Set("Content-Encoding", "gzip")
+	gw.Header().Del("Content-Length")
 }
 
 func (gw *gzipWriter) Write(p []byte) (int, error) {
-	if gw.compressible == nil {
-		var err error
-		ct := gw.Header().Get("Content-Type")
-		allowed := strings.HasPrefix(ct, "application/json") || strings.HasPrefix(ct, "text/html")
-		gw.compressible = &allowed
-		if *gw.compressible {
-			gw.Header().Set("Content-Encoding", "gzip")
-			gw.writer, err = gzip.NewWriterLevel(gw.ResponseWriter, gzip.BestSpeed)
-			if err != nil {
-				return 0, err
-			}
-			return gw.writer.Write(p)
-		}
-
-		return gw.ResponseWriter.Write(p)
-
-	} else if *gw.compressible {
-		return gw.writer.Write(p)
+	if !gw.wroteHeader {
+		gw.WriteHeader(http.StatusOK)
 	}
 
-	return gw.ResponseWriter.Write(p)
+	return gw.writer.Write(p)
 }
 
 func (gw *gzipWriter) Close() error {
-	if gw.writer != nil {
-		return gw.writer.Close()
+	err := gw.writer.Close()
+	gw.writer.Reset(io.Discard)
+	gw.pool.Put(gw.writer)
+	return err
+}
+
+func (gw *gzipWriter) Flush() {
+	if f, ok := gw.GetWriter().(http.Flusher); ok {
+		f.Flush()
 	}
-	return nil
+
+	if f, ok := gw.GetWriter().(Flusher); ok {
+		f.Flush()
+		if f, ok := gw.ResponseWriter.(Flusher); ok {
+			f.Flush()
+		}
+	}
 }
 
 func CreateCompress(l *zap.SugaredLogger) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-			if !strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") {
+			if !strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") &&
+				!strings.HasPrefix(req.Header.Get("Content-Type"), "application/json") &&
+				!strings.HasPrefix(req.Header.Get("Content-Type"), "text/html") {
 				next.ServeHTTP(rw, req)
 				return
 			}
@@ -161,6 +241,92 @@ func CreateCompress(l *zap.SugaredLogger) func(next http.Handler) http.Handler {
 			}()
 
 			next.ServeHTTP(gw, req)
+		})
+	}
+}
+
+func CreateUncompressReq(l *zap.SugaredLogger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			if strings.Contains(req.Header.Get("Content-Encoding"), "gzip") {
+				gr, err := NewGzipReader(req.Body)
+				if err != nil {
+					l.Errorf("error creating reader in uncompress middleware: %s", err)
+					http.Error(rw, "decompression failed", http.StatusInternalServerError)
+					return
+				}
+
+				req.Body = gr
+			}
+
+			next.ServeHTTP(rw, req)
+		})
+	}
+}
+
+type SignWriter struct {
+	http.ResponseWriter
+	h hash.Hash
+}
+
+func NewSignWriter(rw http.ResponseWriter, key string) *SignWriter {
+	return &SignWriter{
+		ResponseWriter: rw,
+		h:              hmac.New(sha256.New, []byte(key)),
+	}
+}
+
+func (sw *SignWriter) Write(p []byte) (int, error) {
+	if sw.h != nil {
+		sw.Write(p)
+		signStr := base64.URLEncoding.EncodeToString(sw.h.Sum(nil))
+		sw.ResponseWriter.Header().Set("HashSHA256", signStr)
+	}
+
+	return sw.ResponseWriter.Write(p)
+}
+
+func CreateSumChecker(key string, l *zap.SugaredLogger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			hashHeader := req.Header.Get("HashSHA256")
+			if hashHeader == "" {
+				l.Warnln("HashSHA256 header is missed")
+				next.ServeHTTP(rw, req)
+				return
+			}
+
+			reqSign, err := base64.URLEncoding.DecodeString(hashHeader)
+			if err != nil {
+				l.Errorf("error encoding hash string: %s", err)
+				http.Error(rw, "encoding error", http.StatusInternalServerError)
+				return
+			}
+
+			var bodyBuf bytes.Buffer
+			req.Body = io.NopCloser(io.TeeReader(req.Body, &bodyBuf))
+
+			h := hmac.New(sha256.New, []byte(key))
+			io.Copy(h, req.Body)
+			sign := h.Sum(nil)
+			fmt.Println(len(bodyBuf.Bytes()))
+
+			if hmac.Equal(reqSign, sign) {
+				req.Body = io.NopCloser(&bodyBuf)
+				next.ServeHTTP(rw, req)
+			} else {
+				l.Errorln("signs are not equal")
+				http.Error(rw, "invalid request", http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func CreateSigner(key string, l *zap.SugaredLogger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			sw := NewSignWriter(rw, key)
+			next.ServeHTTP(sw, req)
 		})
 	}
 }

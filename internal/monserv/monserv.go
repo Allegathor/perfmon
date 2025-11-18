@@ -8,6 +8,7 @@ import (
 	"github.com/Allegathor/perfmon/internal/monserv/handlers"
 	"github.com/Allegathor/perfmon/internal/monserv/middlewares"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
 )
 
@@ -36,6 +37,7 @@ func NewInstance(ctx context.Context, addr string, db handlers.MDB, key string, 
 
 func (s *MonServ) MountHandlers() {
 	api := handlers.NewAPI(s.db, s.Logger)
+	s.Router.Mount("/debug/", middleware.Profiler())
 	mw := chi.Middlewares{middlewares.CreateLogger(s.Logger), middlewares.CreateUncompressReq(s.Logger)}
 	// update-related middlewares
 	umw := make(chi.Middlewares, len(mw))
