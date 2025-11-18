@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"crypto/rsa"
+	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -21,6 +23,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	configPath = "server_config.json"
+)
+
 var (
 	buildVersion = "N/A"
 	buildDate    = "N/A"
@@ -28,49 +34,65 @@ var (
 )
 
 type flags struct {
-	addr           string
-	dbConnStr      string
-	mode           string
-	path           string
-	key            string
-	privateKeyPath string
-	storeInterval  uint
-	restore        bool
+	Addr           string `json:"address"`
+	DBConnStr      string `json:"database_dsn"`
+	Mode           string `json:"mode"`
+	Path           string `json:"store_file"`
+	Key            string `json:"key"`
+	PrivateKeyPath string `json:"crypto_key"`
+	StoreInterval  uint   `json:"store_interval"`
+	Restore        bool   `json:"restore"`
 }
 
 var srvOpts flags
 
 var defSrvOpts = &flags{
-	addr:           "localhost:8080",
-	dbConnStr:      "",
-	mode:           "dev",
-	path:           "./backup.json",
-	privateKeyPath: "",
-	key:            "",
-	storeInterval:  300,
-	restore:        false,
+	Addr:           "localhost:8080",
+	DBConnStr:      "",
+	Mode:           "dev",
+	Path:           "./backup.json",
+	PrivateKeyPath: "",
+	Key:            "",
+	StoreInterval:  300,
+	Restore:        false,
 }
 
 func init() {
-	flag.StringVar(&srvOpts.addr, "a", defSrvOpts.addr, "address to runing a server on")
-	flag.StringVar(&srvOpts.dbConnStr, "d", defSrvOpts.dbConnStr, "URL for DB connection")
-	flag.StringVar(&srvOpts.mode, "m", defSrvOpts.mode, "mode of running the server: dev or prod")
-	flag.StringVar(&srvOpts.key, "k", defSrvOpts.key, "key for signing data")
-	flag.StringVar(&srvOpts.privateKeyPath, "crypto-key", defSrvOpts.privateKeyPath, "path to .pem file with a private key")
-	flag.StringVar(&srvOpts.path, "f", defSrvOpts.path, "path to backup file")
-	flag.UintVar(&srvOpts.storeInterval, "i", defSrvOpts.storeInterval, "interval (in seconds) of writing to backup file")
-	flag.BoolVar(&srvOpts.restore, "r", defSrvOpts.restore, "option to restore from backup file on startup")
+	info, err := os.Stat(configPath)
+	if os.IsNotExist(err) {
+		fmt.Println("config file not found")
+	} else if !info.IsDir() {
+		fmt.Printf("found config file:\n%v\n", info)
+		f, err := os.ReadFile(configPath)
+		if err != nil {
+			fmt.Println("failed to read config file")
+		}
+
+		jsonErr := json.Unmarshal(f, defSrvOpts)
+		if jsonErr != nil {
+			fmt.Println("failed to parse json from config file")
+		}
+	}
+
+	flag.StringVar(&srvOpts.Addr, "a", defSrvOpts.Addr, "address to runing a server on")
+	flag.StringVar(&srvOpts.DBConnStr, "d", defSrvOpts.DBConnStr, "URL for DB connection")
+	flag.StringVar(&srvOpts.Mode, "m", defSrvOpts.Mode, "mode of running the server: dev or prod")
+	flag.StringVar(&srvOpts.Key, "k", defSrvOpts.Key, "key for signing data")
+	flag.StringVar(&srvOpts.PrivateKeyPath, "crypto-key", defSrvOpts.PrivateKeyPath, "path to .pem file with a private key")
+	flag.StringVar(&srvOpts.Path, "f", defSrvOpts.Path, "path to backup file")
+	flag.UintVar(&srvOpts.StoreInterval, "i", defSrvOpts.StoreInterval, "interval (in seconds) of writing to backup file")
+	flag.BoolVar(&srvOpts.Restore, "r", defSrvOpts.Restore, "option to restore from backup file on startup")
 }
 
 func setEnv() {
-	options.SetEnvStr(&srvOpts.addr, "ADDRESS")
-	options.SetEnvStr(&srvOpts.dbConnStr, "DATABASE_DSN")
-	options.SetEnvStr(&srvOpts.mode, "MODE")
-	options.SetEnvStr(&srvOpts.key, "KEY")
-	options.SetEnvStr(&srvOpts.privateKeyPath, "CRYPTO_KEY")
-	options.SetEnvStr(&srvOpts.path, "FILE_STORAGE_PATH")
-	options.SetEnvUint(&srvOpts.storeInterval, "STORE_INTERVAL")
-	options.SetEnvBool(&srvOpts.restore, "RESTORE")
+	options.SetEnvStr(&srvOpts.Addr, "ADDRESS")
+	options.SetEnvStr(&srvOpts.DBConnStr, "DATABASE_DSN")
+	options.SetEnvStr(&srvOpts.Mode, "MODE")
+	options.SetEnvStr(&srvOpts.Key, "KEY")
+	options.SetEnvStr(&srvOpts.PrivateKeyPath, "CRYPTO_KEY")
+	options.SetEnvStr(&srvOpts.Path, "FILE_STORAGE_PATH")
+	options.SetEnvUint(&srvOpts.StoreInterval, "STORE_INTERVAL")
+	options.SetEnvBool(&srvOpts.Restore, "RESTORE")
 }
 
 func initLogger(mode string) *zap.Logger {
@@ -119,17 +141,17 @@ func main() {
 	}()
 
 	var err error
-	logger := initLogger(srvOpts.mode).Sugar()
+	logger := initLogger(srvOpts.Mode).Sugar()
 	logger.Infof("\nBuild version: %s\nBuild date: %s\nBuild commit: %s\n", buildVersion, buildDate, buildCommit)
 
 	bkp := &fw.Backup{
-		Path:        srvOpts.path,
-		Interval:    srvOpts.storeInterval,
+		Path:        srvOpts.Path,
+		Interval:    srvOpts.StoreInterval,
 		Logger:      logger,
-		RestoreFlag: srvOpts.restore,
+		RestoreFlag: srvOpts.Restore,
 	}
 
-	db := repo.Init(context.Background(), srvOpts.dbConnStr, bkp, logger)
+	db := repo.Init(context.Background(), srvOpts.DBConnStr, bkp, logger)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -139,15 +161,15 @@ func main() {
 	wg.Wait()
 
 	var cryptoKey *rsa.PrivateKey
-	if srvOpts.privateKeyPath != "" {
-		cryptoKey, err = ciphers.ReadPrivateKey(srvOpts.privateKeyPath)
+	if srvOpts.PrivateKeyPath != "" {
+		cryptoKey, err = ciphers.ReadPrivateKey(srvOpts.PrivateKeyPath)
 		if err != nil {
 			logger.Errorf("erorr reading private key from file", err)
 			os.Exit(-1)
 		}
 	}
 
-	s := monserv.NewInstance(ctx, srvOpts.addr, db, srvOpts.key, cryptoKey, logger)
+	s := monserv.NewInstance(ctx, srvOpts.Addr, db, srvOpts.Key, cryptoKey, logger)
 	s.MountHandlers()
 
 	g, gCtx := errgroup.WithContext(ctx)

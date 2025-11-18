@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rsa"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -16,6 +17,10 @@ import (
 	"github.com/Allegathor/perfmon/internal/options"
 )
 
+const (
+	configPath = "agent_config.json"
+)
+
 var (
 	buildVersion = "N/A"
 	buildDate    = "N/A"
@@ -23,21 +28,21 @@ var (
 )
 
 type flags struct {
-	addr           string
-	key            string
-	publicKeyPath  string
-	rateLimit      uint
-	reportInterval uint
-	pollInterval   uint
+	Addr           string `json:"address"`
+	Key            string `json:"key"`
+	PublicKeyPath  string `json:"crypto_key"`
+	RateLimit      uint   `json:"rate_limit"`
+	ReportInterval uint   `json:"report_interval"`
+	PollInterval   uint   `json:"poll_interval"`
 }
 
 var defOpts = &flags{
-	addr:           "http://localhost:8080",
-	key:            "",
-	publicKeyPath:  "",
-	rateLimit:      3,
-	reportInterval: 10,
-	pollInterval:   2,
+	Addr:           "http://localhost:8080",
+	Key:            "",
+	PublicKeyPath:  "",
+	RateLimit:      3,
+	ReportInterval: 10,
+	PollInterval:   2,
 }
 
 func setAddr(value string, defaultValue string) string {
@@ -55,33 +60,50 @@ func setAddr(value string, defaultValue string) string {
 }
 
 var agOpts = &flags{
-	addr: defOpts.addr,
+	Addr: defOpts.Addr,
 }
 
 func init() {
+	info, err := os.Stat(configPath)
+	if os.IsNotExist(err) {
+		fmt.Println("config file not found")
+	} else if !info.IsDir() {
+		fmt.Printf("found config file:\n%v\n", info)
+		f, err := os.ReadFile(configPath)
+		if err != nil {
+			fmt.Println("failed to read config file")
+		}
+
+		jsonErr := json.Unmarshal(f, defOpts)
+		if jsonErr != nil {
+			fmt.Println("failed to parse json from config file")
+		}
+	}
+	options.SetEnvStr(&agOpts.key, "KEY")
+
 	flag.Func("a", "address of a server to send metrics", func(flagValue string) error {
-		fmt.Println(flagValue, defOpts.addr)
-		agOpts.addr = setAddr(flagValue, defOpts.addr)
+		fmt.Println(flagValue, defOpts.Addr)
+		agOpts.Addr = setAddr(flagValue, defOpts.Addr)
 		return nil
 	})
-	flag.StringVar(&agOpts.key, "k", defOpts.key, "key for signing data in requests")
-	flag.StringVar(&agOpts.publicKeyPath, "crypto-key", defOpts.publicKeyPath, "path to .pem file with a public key")
-	flag.UintVar(&agOpts.rateLimit, "l", defOpts.rateLimit, "maximum requests with report to a server")
-	flag.UintVar(&agOpts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
-	flag.UintVar(&agOpts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
+	flag.StringVar(&agOpts.Key, "k", defOpts.Key, "key for signing data in requests")
+	flag.StringVar(&agOpts.PublicKeyPath, "crypto-key", defOpts.PublicKeyPath, "path to .pem file with a public key")
+	flag.UintVar(&agOpts.RateLimit, "l", defOpts.RateLimit, "maximum requests with report to a server")
+	flag.UintVar(&agOpts.ReportInterval, "r", defOpts.ReportInterval, "interval (in seconds) of sending metrics to a server")
+	flag.UintVar(&agOpts.PollInterval, "p", defOpts.PollInterval, "interval (in seconds) of reading metrics from a system")
 }
 
 func setEnv() {
 	if v, ok := os.LookupEnv("ADDRESS"); ok {
 		addr := setAddr(v, "")
 		if addr != "" {
-			agOpts.addr = addr
+			agOpts.Addr = addr
 		}
 	}
-	options.SetEnvStr(&agOpts.key, "KEY")
+	options.SetEnvStr(&agOpts.Key, "KEY")
 
-	options.SetEnvUint(&agOpts.reportInterval, "REPORT_INTERVAL")
-	options.SetEnvUint(&agOpts.pollInterval, "POLL_INTERVAL")
+	options.SetEnvUint(&agOpts.ReportInterval, "REPORT_INTERVAL")
+	options.SetEnvUint(&agOpts.PollInterval, "POLL_INTERVAL")
 }
 
 func main() {
@@ -90,19 +112,19 @@ func main() {
 	fmt.Printf("\nBuild version: %s\nBuild date: %s\nBuild commit: %s\n", buildVersion, buildDate, buildCommit)
 
 	var cryptoKey *rsa.PublicKey
-	if agOpts.publicKeyPath != "" {
-		k, err := ciphers.ReadPublicKey(agOpts.publicKeyPath)
+	if agOpts.PublicKeyPath != "" {
+		k, err := ciphers.ReadPublicKey(agOpts.PublicKeyPath)
 		if err != nil {
 			log.Fatal(err)
 		}
 		cryptoKey = k
 	}
 
-	client := monclient.NewInstance(agOpts.addr, agOpts.key, cryptoKey, agOpts.reportInterval)
-	cl := collector.New(agOpts.pollInterval)
+	client := monclient.NewInstance(agOpts.Addr, agOpts.Key, cryptoKey, agOpts.ReportInterval)
+	cl := collector.New(agOpts.PollInterval)
 
 	go cl.Monitor()
-	go client.PollStatsBatch(cl, agOpts.rateLimit, 9)
+	go client.PollStatsBatch(cl, agOpts.RateLimit, 9)
 
 	runtime.Goexit()
 }
