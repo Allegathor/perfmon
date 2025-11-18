@@ -16,6 +16,7 @@ import (
 type flags struct {
 	addr           string
 	key            string
+	rateLimit      uint
 	reportInterval uint
 	pollInterval   uint
 }
@@ -23,6 +24,7 @@ type flags struct {
 var defOpts = &flags{
 	addr:           "http://localhost:8080",
 	key:            "",
+	rateLimit:      3,
 	reportInterval: 10,
 	pollInterval:   2,
 }
@@ -52,6 +54,7 @@ func init() {
 		return nil
 	})
 	flag.StringVar(&agOpts.key, "k", defOpts.key, "key for signing data in requests")
+	flag.UintVar(&agOpts.rateLimit, "l", defOpts.rateLimit, "maximum requests with report to a server")
 	flag.UintVar(&agOpts.reportInterval, "r", defOpts.reportInterval, "interval (in seconds) of sending metrics to a server")
 	flag.UintVar(&agOpts.pollInterval, "p", defOpts.pollInterval, "interval (in seconds) of reading metrics from a system")
 }
@@ -77,7 +80,7 @@ func main() {
 	cl := collector.New(agOpts.pollInterval)
 
 	go cl.Monitor()
-	go client.PollStatsBatch(cl)
+	go client.PollStatsBatch(cl, agOpts.rateLimit, 9)
 
 	runtime.Goexit()
 }
