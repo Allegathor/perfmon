@@ -19,6 +19,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+var (
+	buildVersion = "N/A"
+	buildDate    = "N/A"
+	buildCommit  = "N/A"
+)
+
 type flags struct {
 	addr          string
 	dbConnStr     string
@@ -108,6 +114,7 @@ func main() {
 
 	var err error
 	logger := initLogger(srvOpts.mode).Sugar()
+	logger.Infof("\nBuild version: %s\nBuild date: %s\nBuild commit: %s\n", buildVersion, buildDate, buildCommit)
 
 	bkp := &fw.Backup{
 		Path:        srvOpts.path,
