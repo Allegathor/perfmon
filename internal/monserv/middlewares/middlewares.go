@@ -280,7 +280,6 @@ func NewSignWriter(rw http.ResponseWriter, key string) *SignWriter {
 
 func (sw *SignWriter) Write(p []byte) (int, error) {
 	if sw.h != nil {
-		sw.Write(p)
 		signStr := base64.URLEncoding.EncodeToString(sw.h.Sum(nil))
 		sw.ResponseWriter.Header().Set("HashSHA256", signStr)
 	}

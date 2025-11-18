@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"runtime"
@@ -114,7 +116,8 @@ func New(pollInterval uint) *Collector {
 	}
 }
 
-func (c *Collector) GopsStats() {
+func (c *Collector) GopsStats(wg *sync.WaitGroup) {
+	defer wg.Done()
 	v, _ := mem.VirtualMemory()
 	coresUt, _ := cpu.Percent(0, true)
 	c.Repo.Gauge.Update(func(tx *MtcsTx[float64]) error {
@@ -129,7 +132,8 @@ func (c *Collector) GopsStats() {
 	})
 }
 
-func (c *Collector) RuntimeStats() {
+func (c *Collector) RuntimeStats(wg *sync.WaitGroup) {
+	defer wg.Done()
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
@@ -175,7 +179,8 @@ func (c *Collector) RuntimeStats() {
 	})
 }
 
-func (c *Collector) UpdateCounters() {
+func (c *Collector) UpdateCounters(wg *sync.WaitGroup) {
+	defer wg.Done()
 	c.Repo.Counter.Update(func(tx *MtcsTx[int64]) error {
 		tx.Set("PollCount", 1)
 
@@ -183,10 +188,16 @@ func (c *Collector) UpdateCounters() {
 	})
 }
 
-func (c *Collector) Stats() {
-	go c.GopsStats()
-	go c.RuntimeStats()
-	go c.UpdateCounters()
+func (c *Collector) Stats(mainGroup *sync.WaitGroup) {
+	var wg sync.WaitGroup
+
+	wg.Add(3)
+	go c.GopsStats(&wg)
+	go c.RuntimeStats(&wg)
+	go c.UpdateCounters(&wg)
+
+	wg.Wait()
+	mainGroup.Done()
 }
 
 type MonitorResult struct {
@@ -194,9 +205,19 @@ type MonitorResult struct {
 	Counter map[string]int64
 }
 
-func (c *Collector) Monitor() {
+func (c *Collector) Monitor(ctx context.Context) error {
+	var tickerWG sync.WaitGroup
+	ticker := time.NewTicker(time.Duration(c.pollInterval) * time.Second)
 	for {
-		time.Sleep(time.Duration(c.pollInterval) * time.Second)
-		go c.Stats()
+		select {
+		case <-ticker.C:
+			tickerWG.Add(1)
+			go c.Stats(&tickerWG)
+		case <-ctx.Done():
+			ticker.Stop()
+			tickerWG.Wait()
+
+			return errors.New("collector graceful shutdown")
+		}
 	}
 }

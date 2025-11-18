@@ -24,7 +24,11 @@ import (
 )
 
 const (
-	configPath = "server_config.json"
+	configPath      = "server_config.json"
+	logPath         = "server.log"
+	shutdownTimeout = 30 * time.Second
+	devMode         = "dev"
+	prodMode        = "prod"
 )
 
 var (
@@ -49,7 +53,7 @@ var srvOpts flags
 var defSrvOpts = &flags{
 	Addr:           "localhost:8080",
 	DBConnStr:      "",
-	Mode:           "dev",
+	Mode:           devMode,
 	Path:           "./backup.json",
 	PrivateKeyPath: "",
 	Key:            "",
@@ -97,8 +101,8 @@ func setEnv() {
 
 func initLogger(mode string) *zap.Logger {
 	var core zapcore.Core
-	if mode == "prod" {
-		f, err := os.OpenFile("server.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if mode == prodMode {
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			panic(err)
 		}
@@ -134,7 +138,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 
 		<-c
 		cancel()
@@ -164,8 +168,7 @@ func main() {
 	if srvOpts.PrivateKeyPath != "" {
 		cryptoKey, err = ciphers.ReadPrivateKey(srvOpts.PrivateKeyPath)
 		if err != nil {
-			logger.Errorf("erorr reading private key from file", err)
-			os.Exit(-1)
+			logger.Fatalf("erorr reading private key from file", err)
 		}
 	}
 
@@ -181,7 +184,7 @@ func main() {
 	})
 	g.Go(func() error {
 		<-gCtx.Done()
-		timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		timeoutCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
 		defer cancel()
 		db.Close()
 
