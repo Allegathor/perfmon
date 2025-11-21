@@ -44,9 +44,20 @@ type flags struct {
 	Path           string `json:"store_file"`
 	Key            string `json:"key"`
 	PrivateKeyPath string `json:"crypto_key"`
+	Protocol       string `json:"protocol"`
 	TrustedSubnet  string `json:"trusted_subnet"`
 	StoreInterval  uint   `json:"store_interval"`
 	Restore        bool   `json:"restore"`
+}
+
+type ServerProtocols struct {
+	http string
+	grpc string
+}
+
+var protocols = ServerProtocols{
+	http: "http",
+	grpc: "grpc",
 }
 
 var srvOpts flags
@@ -56,6 +67,7 @@ var defSrvOpts = &flags{
 	DBConnStr:      "",
 	Mode:           devMode,
 	Path:           "./backup.json",
+	Protocol:       protocols.http,
 	PrivateKeyPath: "",
 	TrustedSubnet:  "",
 	Key:            "",
@@ -87,6 +99,7 @@ func init() {
 	flag.StringVar(&srvOpts.PrivateKeyPath, "crypto-key", defSrvOpts.PrivateKeyPath, "path to .pem file with a private key")
 	flag.StringVar(&srvOpts.TrustedSubnet, "t", defSrvOpts.TrustedSubnet, "trusted subnet")
 	flag.StringVar(&srvOpts.Path, "f", defSrvOpts.Path, "path to backup file")
+	flag.StringVar(&srvOpts.Protocol, "p", defSrvOpts.Protocol, "select protocol: http or grpc")
 	flag.UintVar(&srvOpts.StoreInterval, "i", defSrvOpts.StoreInterval, "interval (in seconds) of writing to backup file")
 	flag.BoolVar(&srvOpts.Restore, "r", defSrvOpts.Restore, "option to restore from backup file on startup")
 }
@@ -99,6 +112,7 @@ func setEnv() {
 	options.SetEnvStr(&srvOpts.PrivateKeyPath, "CRYPTO_KEY")
 	options.SetEnvStr(&srvOpts.TrustedSubnet, "TRUSTED_SUBNET")
 	options.SetEnvStr(&srvOpts.Path, "FILE_STORAGE_PATH")
+	options.SetEnvStr(&srvOpts.Protocol, "PROTOCOL")
 	options.SetEnvUint(&srvOpts.StoreInterval, "STORE_INTERVAL")
 	options.SetEnvBool(&srvOpts.Restore, "RESTORE")
 }
@@ -176,36 +190,71 @@ func main() {
 		}
 	}
 
-	s := monserv.NewInstance(ctx, srvOpts.Addr, db, srvOpts.Key, cryptoKey, srvOpts.TrustedSubnet, logger)
-	s.MountHandlers()
+	switch srvOpts.Protocol {
+	case protocols.http:
+		s := monserv.NewInstance(ctx, srvOpts.Addr, db, srvOpts.Key, cryptoKey, srvOpts.TrustedSubnet, logger)
+		s.MountHandlers()
 
-	g, gCtx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		return s.ListenAndServe()
-	})
-	g.Go(func() error {
-		return db.ScheduleBackup(gCtx)
-	})
-	g.Go(func() error {
-		<-gCtx.Done()
-		timeoutCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
-		defer cancel()
-		db.Close()
+		g, gCtx := errgroup.WithContext(ctx)
+		g.Go(func() error {
+			return s.ListenAndServe()
+		})
+		g.Go(func() error {
+			return db.ScheduleBackup(gCtx)
+		})
+		g.Go(func() error {
+			<-gCtx.Done()
+			timeoutCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+			defer cancel()
+			db.Close()
 
-		go func() error {
-			<-timeoutCtx.Done()
-			if timeoutCtx.Err() == context.DeadlineExceeded {
-				return errors.New("timed out performing graceful shutdown")
-			}
+			go func() error {
+				<-timeoutCtx.Done()
+				if timeoutCtx.Err() == context.DeadlineExceeded {
+					return errors.New("timed out performing graceful shutdown")
+				}
 
+				return nil
+			}()
+
+			return s.Shutdown(timeoutCtx)
+		})
+		logger.Infow("server was started", "addr:", s.Addr)
+		if err = g.Wait(); err != nil {
+			logger.Errorf("exit reason: %s", err)
+		}
+	case protocols.grpc:
+		s := monserv.NewGRPCInstance(ctx, srvOpts.Addr, db, srvOpts.Key, cryptoKey, srvOpts.TrustedSubnet, logger)
+
+		g, gCtx := errgroup.WithContext(ctx)
+		g.Go(func() error {
+			return s.ListenAndServe()
+		})
+		g.Go(func() error {
+			return db.ScheduleBackup(gCtx)
+		})
+		g.Go(func() error {
+			<-gCtx.Done()
+			timeoutCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+			defer cancel()
+			db.Close()
+
+			go func() error {
+				<-timeoutCtx.Done()
+				if timeoutCtx.Err() == context.DeadlineExceeded {
+					return errors.New("timed out performing graceful shutdown")
+				}
+
+				return nil
+			}()
+
+			s.GracefulStop()
 			return nil
-		}()
-
-		return s.Shutdown(timeoutCtx)
-	})
-
-	logger.Infow("server was started", "addr:", s.Addr)
-	if err = g.Wait(); err != nil {
-		logger.Errorf("exit reason: %s", err)
+		})
+		logger.Infow("GRPC server was started", "addr:", s.Addr)
+		if err = g.Wait(); err != nil {
+			logger.Errorf("exit reason: %s", err)
+		}
 	}
+
 }

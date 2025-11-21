@@ -8,9 +8,11 @@ import (
 
 	"github.com/Allegathor/perfmon/internal/monserv/handlers"
 	"github.com/Allegathor/perfmon/internal/monserv/middlewares"
+	pb "github.com/Allegathor/perfmon/internal/proto"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 type MonServ struct {
@@ -97,4 +99,39 @@ func (s *MonServ) MountHandlers() {
 	})
 
 	s.Handler = s.Router
+}
+
+type MonServGRPC struct {
+	*grpc.Server
+	Addr          string
+	db            handlers.MDB
+	key           string
+	cryptoKey     *rsa.PrivateKey
+	trustedSubnet string
+	Logger        *zap.SugaredLogger
+}
+
+func NewGRPCInstance(ctx context.Context, addr string, db handlers.MDB, key string, cryptoKey *rsa.PrivateKey, subnet string, l *zap.SugaredLogger) *MonServGRPC {
+	s := &MonServGRPC{
+		Addr:          addr,
+		Server:        grpc.NewServer(grpc.ChainUnaryInterceptor(middlewares.CreateLoggerInterceptor(l))),
+		db:            db,
+		key:           key,
+		cryptoKey:     cryptoKey,
+		trustedSubnet: subnet,
+		Logger:        l,
+	}
+
+	return s
+}
+
+func (s *MonServGRPC) ListenAndServe() error {
+
+	metricsAPI := handlers.NewGRPCAPI(s.db, s.Logger)
+	pb.RegisterMetricsServer(s, metricsAPI)
+	listen, err := net.Listen("tcp", s.Addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(listen)
 }

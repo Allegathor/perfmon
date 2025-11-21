@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package metricsgsv;
+
+option go_package = "github.com/Allegathor/perfmon/internal/proto/metricsgsv";
+
+message MetricsRec {
+  string ID = 1;
+  string MType = 2;
+  sint64 Delta = 3;
+  double Value = 4;
+}
+
+message UpdateMetricsRequest { MetricsRec metrics = 1; }
+message UpdateMetricsResponse { string ID = 1; }
+
+message UpdateMetricsBatchRequest { repeated MetricsRec metrics = 1; }
+message UpdateMetricsBatchResponse { sint64 size = 1; }
+
+message GetMetricsRequest { MetricsRec metrics = 1; }
+
+message GetMetricsResponse { MetricsRec metrics = 1; }
+
+service Metrics {
+  rpc UpdateMetrics(UpdateMetricsRequest) returns (UpdateMetricsResponse);
+  rpc UpdateMetricsBatch(UpdateMetricsBatchRequest)
+      returns (UpdateMetricsBatchResponse);
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+}

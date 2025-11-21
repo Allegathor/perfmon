@@ -10,8 +10,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"regexp"
-	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +33,16 @@ var (
 	buildCommit  = "N/A"
 )
 
+type AgentProtocols struct {
+	http string
+	grpc string
+}
+
+var protocols = AgentProtocols{
+	http: "http",
+	grpc: "grpc",
+}
+
 type flags struct {
 	Addr           string `json:"address"`
 	Key            string `json:"key"`
@@ -42,33 +50,22 @@ type flags struct {
 	RateLimit      uint   `json:"rate_limit"`
 	ReportInterval uint   `json:"report_interval"`
 	PollInterval   uint   `json:"poll_interval"`
+	Protocol       string `json:"protocol"`
 }
 
 var defOpts = &flags{
-	Addr:           "http://localhost:8080",
+	Addr:           "localhost:8080",
 	Key:            "",
 	PublicKeyPath:  "",
 	RateLimit:      3,
 	ReportInterval: 10,
 	PollInterval:   2,
-}
-
-func setAddr(value string, defaultValue string) string {
-	hasProto := strings.Contains(value, "http://") || strings.Contains(value, "https://")
-	if !hasProto {
-		value = "http://" + value
-	}
-
-	matched, _ := regexp.MatchString(`.+(\w+|\w+\.\w+):{1}\d+`, value)
-	if !matched {
-		return defaultValue
-	}
-
-	return value
+	Protocol:       protocols.http,
 }
 
 var agOpts = &flags{
-	Addr: defOpts.Addr,
+	Addr:     defOpts.Addr,
+	Protocol: defOpts.Protocol,
 }
 
 func init() {
@@ -88,13 +85,10 @@ func init() {
 		}
 	}
 
-	flag.Func("a", "address of a server to send metrics", func(flagValue string) error {
-		fmt.Println(flagValue, defOpts.Addr)
-		agOpts.Addr = setAddr(flagValue, defOpts.Addr)
-		return nil
-	})
+	flag.StringVar(&agOpts.Addr, "a", defOpts.Addr, "address of a server to send metrics")
 	flag.StringVar(&agOpts.Key, "k", defOpts.Key, "key for signing data in requests")
 	flag.StringVar(&agOpts.PublicKeyPath, "crypto-key", defOpts.PublicKeyPath, "path to .pem file with a public key")
+	flag.StringVar(&agOpts.Protocol, "protocol", defOpts.Protocol, "select protocol: http or grpc")
 	flag.UintVar(&agOpts.RateLimit, "l", defOpts.RateLimit, "maximum requests with report to a server")
 	flag.UintVar(&agOpts.ReportInterval, "r", defOpts.ReportInterval, "interval (in seconds) of sending metrics to a server")
 	flag.UintVar(&agOpts.PollInterval, "p", defOpts.PollInterval, "interval (in seconds) of reading metrics from a system")
@@ -102,11 +96,12 @@ func init() {
 
 func setEnv() {
 	if v, ok := os.LookupEnv("ADDRESS"); ok {
-		addr := setAddr(v, "")
-		if addr != "" {
-			agOpts.Addr = addr
+		if v != "" {
+			agOpts.Addr = v
 		}
 	}
+
+	options.SetEnvStr(&agOpts.Protocol, "PROTOCOL")
 	options.SetEnvStr(&agOpts.Key, "KEY")
 
 	options.SetEnvUint(&agOpts.ReportInterval, "REPORT_INTERVAL")
@@ -137,35 +132,70 @@ func main() {
 		cryptoKey = k
 	}
 
-	client := monclient.NewInstance(agOpts.Addr, agOpts.Key, cryptoKey, agOpts.ReportInterval)
-	cl := collector.New(agOpts.PollInterval)
+	switch agOpts.Protocol {
+	case protocols.http:
+		client := monclient.NewInstance(agOpts.Addr, agOpts.Key, cryptoKey, agOpts.ReportInterval)
+		cl := collector.New(agOpts.PollInterval)
 
-	g, gCtx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		return cl.Monitor(gCtx)
-	})
-	g.Go(func() error {
-		return client.PollStatsBatch(gCtx, cl, agOpts.RateLimit, clientPollCap)
-	})
-	g.Go(func() error {
-		<-gCtx.Done()
-		timeoutCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
-		defer cancel()
+		g, gCtx := errgroup.WithContext(ctx)
+		g.Go(func() error {
+			return cl.Monitor(gCtx)
+		})
+		g.Go(func() error {
+			return client.PollStatsBatch(gCtx, cl, agOpts.RateLimit, clientPollCap)
+		})
+		g.Go(func() error {
+			<-gCtx.Done()
+			timeoutCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+			defer cancel()
 
-		go func() error {
-			<-timeoutCtx.Done()
-			if timeoutCtx.Err() == context.DeadlineExceeded {
-				return errors.New("timed out performing graceful shutdown")
-			}
+			go func() error {
+				<-timeoutCtx.Done()
+				if timeoutCtx.Err() == context.DeadlineExceeded {
+					return errors.New("timed out performing graceful shutdown")
+				}
 
-			return nil
-		}()
+				return nil
+			}()
 
-		return errors.New("agent shutdown")
-	})
+			return errors.New("agent shutdown")
+		})
 
-	fmt.Printf("agent was started, addr:%s\n", agOpts.Addr)
-	if err := g.Wait(); err != nil {
-		fmt.Printf("exit reason: %s\n", err)
+		fmt.Printf("agent was started, addr:%s\n", agOpts.Addr)
+		if err := g.Wait(); err != nil {
+			fmt.Printf("exit reason: %s\n", err)
+		}
+	case protocols.grpc:
+		client := monclient.NewInstanceGRPC(agOpts.Addr, agOpts.Key, cryptoKey, agOpts.ReportInterval)
+		cl := collector.New(agOpts.PollInterval)
+
+		g, gCtx := errgroup.WithContext(ctx)
+		g.Go(func() error {
+			return cl.Monitor(gCtx)
+		})
+		g.Go(func() error {
+			return client.PollStatsBatch(gCtx, cl, agOpts.RateLimit, clientPollCap)
+		})
+		g.Go(func() error {
+			<-gCtx.Done()
+			timeoutCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+			defer cancel()
+
+			go func() error {
+				<-timeoutCtx.Done()
+				if timeoutCtx.Err() == context.DeadlineExceeded {
+					return errors.New("timed out performing graceful shutdown")
+				}
+
+				return nil
+			}()
+
+			return errors.New("agent shutdown")
+		})
+
+		fmt.Printf("grpc agent was started, addr:%s\n", agOpts.Addr)
+		if err := g.Wait(); err != nil {
+			fmt.Printf("exit reason: %s\n", err)
+		}
 	}
 }

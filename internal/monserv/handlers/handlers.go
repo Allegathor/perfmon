@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/Allegathor/perfmon/internal/mondata"
+	pb "github.com/Allegathor/perfmon/internal/proto"
 	"github.com/go-chi/chi/v5"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -458,4 +462,141 @@ func (api *API) PingHandler(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	rw.WriteHeader(http.StatusOK)
+}
+
+// GRPC API
+type GRPCAPI struct {
+	pb.UnimplementedMetricsServer
+	db     MDB
+	logger ErrLogger
+}
+
+func NewGRPCAPI(db MDB, logger ErrLogger) *GRPCAPI {
+	return &GRPCAPI{
+		pb.UnimplementedMetricsServer{},
+		db,
+		logger,
+	}
+}
+
+// Logs error and responds with error code and error message
+func (api *GRPCAPI) Error(err *RespError, c codes.Code) {
+	api.logger.Errorln(err)
+	status.Error(c, err.Msg())
+}
+
+// Accepts requests with GRPC
+//
+// Updates specified metric and respond with ID if succeeded.
+func (api *GRPCAPI) UpdateMetrics(ctx context.Context, in *pb.UpdateMetricsRequest) (*pb.UpdateMetricsResponse, error) {
+	if in.Metrics.ID == "" {
+		return nil, status.Error(codes.InvalidArgument, "name must contain a value")
+	}
+
+	var resp pb.UpdateMetricsResponse
+	switch in.Metrics.MType {
+	case mondata.GaugeType:
+		err := api.db.SetGauge(ctx, in.Metrics.ID, in.Metrics.Value)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "setting gauge value in db failed")
+		}
+		resp.ID = in.Metrics.ID
+		return &resp, nil
+	case mondata.CounterType:
+		err := api.db.SetCounter(ctx, in.Metrics.ID, in.Metrics.Delta)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "setting counter value in db failed")
+		}
+		resp.ID = in.Metrics.ID
+		return &resp, nil
+	default:
+		return nil, status.Error(codes.InvalidArgument, "name must contain a value")
+	}
+}
+
+// Accepts requests with GRPC that contains array of metric data.
+//
+// Updates specified metrics and respond with len if succeeded.
+func (api *GRPCAPI) UpdateMetricsBatch(ctx context.Context, in *pb.UpdateMetricsBatchRequest) (*pb.UpdateMetricsBatchResponse, error) {
+	fmt.Println("UPDATE METRICS BATCH")
+	gm := make(map[string]float64)
+	cm := make(map[string]int64)
+
+	var resp pb.UpdateMetricsBatchResponse
+	var updLen int64
+
+	for _, rec := range in.Metrics {
+		if rec.ID == "" {
+			continue
+		}
+
+		updLen++
+		if rec.MType == mondata.GaugeType {
+			gm[rec.ID] = rec.Value
+
+		} else if rec.MType == mondata.CounterType {
+			if cv, ok := cm[rec.ID]; ok {
+				cm[rec.ID] = cv + rec.Delta
+				continue
+			}
+			cm[rec.ID] = rec.Delta
+		}
+	}
+
+	if len(gm) == 0 && len(cm) == 0 {
+		return nil, status.Error(codes.Internal, "nothging to update")
+	}
+
+	if len(gm) > 0 {
+		if err := api.db.SetGaugeAll(ctx, gm); err != nil {
+			return nil, status.Error(codes.Internal, "gauge batch update to db failed")
+		}
+	}
+
+	if len(cm) > 0 {
+		if err := api.db.SetCounterAll(ctx, cm); err != nil {
+			return nil, status.Error(codes.Internal, "counter batch update to db failed")
+		}
+	}
+
+	resp.Size = updLen
+	return &resp, nil
+}
+
+// Accepts request with GRPC containing metrics.
+//
+// Responds with specified value.
+func (api *GRPCAPI) GetMetrics(ctx context.Context, in *pb.GetMetricsRequest) (*pb.GetMetricsResponse, error) {
+	if in.Metrics.ID == "" {
+		return nil, status.Error(codes.InvalidArgument, "name must contain a value")
+	}
+
+	switch in.Metrics.MType {
+	case mondata.GaugeType:
+		v, ok, err := api.db.GetGauge(ctx, in.Metrics.ID)
+		fmt.Println(v, ok, err)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "getting gauge value from db failed")
+		} else if ok {
+			return &pb.GetMetricsResponse{
+				Metrics: &pb.MetricsRec{
+					ID: in.Metrics.ID, MType: in.Metrics.MType, Value: v,
+				},
+			}, nil
+		}
+		return nil, status.Error(codes.NotFound, "value doesn't exist in the storage")
+	case mondata.CounterType:
+		v, ok, err := api.db.GetCounter(ctx, in.Metrics.ID)
+		if err != nil {
+			return nil, status.Error(codes.Internal, "getting counter value from db failed")
+		} else if ok {
+			return &pb.GetMetricsResponse{
+				Metrics: &pb.MetricsRec{
+					ID: in.Metrics.ID, MType: in.Metrics.MType, Delta: v,
+				},
+			}, nil
+		}
+		return nil, status.Error(codes.NotFound, "value doesn't exist in the storage")
+	}
+	return nil, status.Error(codes.InvalidArgument, "name must contain a value")
 }

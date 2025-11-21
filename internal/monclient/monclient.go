@@ -19,7 +19,10 @@ import (
 	"github.com/Allegathor/perfmon/internal/ciphers"
 	"github.com/Allegathor/perfmon/internal/collector"
 	"github.com/Allegathor/perfmon/internal/mondata"
+	pb "github.com/Allegathor/perfmon/internal/proto"
 	"github.com/go-resty/resty/v2"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -89,11 +92,11 @@ func buildReqBody(name string, mtype string, g *float64, c *int64) []byte {
 	return j
 }
 
-func buildReqBatchBody(gm map[string]float64, cm map[string]int64) []byte {
+func buildBatch(gm map[string]float64, cm map[string]int64) []mondata.Metrics {
 	mbatch := make([]mondata.Metrics, 0)
 
 	if len(gm) == 0 && len(cm) == 0 {
-		return make([]byte, 0)
+		return mbatch
 	}
 
 	for k, v := range gm {
@@ -111,6 +114,38 @@ func buildReqBatchBody(gm map[string]float64, cm map[string]int64) []byte {
 			Delta: &d,
 		})
 	}
+
+	return mbatch
+}
+
+func buildBatchPb(gm map[string]float64, cm map[string]int64) []*pb.MetricsRec {
+	mbatch := make([]*pb.MetricsRec, 0)
+
+	if len(gm) == 0 && len(cm) == 0 {
+		return mbatch
+	}
+
+	for k, v := range gm {
+		mbatch = append(mbatch, &pb.MetricsRec{
+			ID:    k,
+			MType: "gauge",
+			Value: v,
+		})
+	}
+
+	for k, d := range cm {
+		mbatch = append(mbatch, &pb.MetricsRec{
+			ID:    k,
+			MType: "counter",
+			Delta: d,
+		})
+	}
+
+	return mbatch
+}
+
+func buildReqBatchBody(gm map[string]float64, cm map[string]int64) []byte {
+	mbatch := buildBatch(gm, cm)
 
 	j, err := json.Marshal(mbatch)
 	if err != nil {
@@ -233,8 +268,6 @@ func readStats(id int64, cl *collector.Collector, wg *sync.WaitGroup, repsCh cha
 	})
 
 	repsCh <- &Report{gm, cm, id}
-
-	id++
 }
 
 func (m *MonClient) PollStatsBatch(ctx context.Context, cl *collector.Collector, wpoolCount uint, chCap uint) error {
@@ -252,6 +285,80 @@ func (m *MonClient) PollStatsBatch(ctx context.Context, cl *collector.Collector,
 	for {
 		select {
 		case <-ticker.C:
+			id++
+			tickerWG.Add(1)
+			go readStats(id, cl, &tickerWG, repsCh)
+		case <-ctx.Done():
+			ticker.Stop()
+			tickerWG.Wait()
+			close(repsCh)
+			poolWG.Wait()
+
+			return errors.New("client graceful shutdown")
+		}
+	}
+}
+
+type MonClientGRPC struct {
+	addr           string
+	reportInterval uint
+	h              hash.Hash
+	cryptoKey      *rsa.PublicKey
+}
+
+func NewInstanceGRPC(addr string, key string, cryptoKey *rsa.PublicKey, interval uint) *MonClientGRPC {
+	var h hash.Hash = nil
+	if key != "" {
+		h = hmac.New(sha256.New, []byte(key))
+	}
+
+	m := &MonClientGRPC{
+		addr:           addr,
+		h:              h,
+		cryptoKey:      cryptoKey,
+		reportInterval: interval,
+	}
+
+	return m
+}
+
+func (m *MonClientGRPC) PollWorker(ctx context.Context, pbClient pb.MetricsClient, idx uint, reps <-chan *Report, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for r := range reps {
+		b := buildBatchPb(r.gm, r.cm)
+		if len(b) > 0 {
+			fmt.Println("UPDATE SUCCESS")
+			pbClient.UpdateMetricsBatch(ctx, &pb.UpdateMetricsBatchRequest{
+				Metrics: b,
+			})
+		}
+		fmt.Printf("worker %d complete job N%d\n", idx, r.id)
+	}
+}
+
+func (m *MonClientGRPC) PollStatsBatch(ctx context.Context, cl *collector.Collector, wpoolCount uint, chCap uint) error {
+	conn, err := grpc.Dial(m.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	pbClient := pb.NewMetricsClient(conn)
+
+	var id int64
+	repsCh := make(chan *Report, chCap)
+
+	var poolWG sync.WaitGroup
+	for i := range wpoolCount {
+		poolWG.Add(1)
+		go m.PollWorker(ctx, pbClient, i, repsCh, &poolWG)
+	}
+
+	var tickerWG sync.WaitGroup
+	ticker := time.NewTicker(time.Duration(m.reportInterval) * time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			id++
 			tickerWG.Add(1)
 			go readStats(id, cl, &tickerWG, repsCh)
 		case <-ctx.Done():

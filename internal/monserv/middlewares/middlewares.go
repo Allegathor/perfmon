@@ -3,6 +3,7 @@ package middlewares
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/hmac"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/Allegathor/perfmon/internal/ciphers"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 type Flusher interface {
@@ -388,5 +390,20 @@ func CreateSubnetRestrictor(subnet string, l *zap.SugaredLogger) func(next http.
 
 			next.ServeHTTP(rw, req)
 		})
+	}
+}
+
+func CreateLoggerInterceptor(l *zap.SugaredLogger) func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		start := time.Now()
+
+		handler(ctx, req)
+		d := time.Since(start)
+		l.Infoln(
+			"req", req,
+			"duration:", d,
+		)
+
+		return nil, nil
 	}
 }
